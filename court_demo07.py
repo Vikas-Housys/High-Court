@@ -1,0 +1,407 @@
+import os
+import json
+from gtts import gTTS
+import pygame
+import time
+import customtkinter as ctk
+from tkinter import messagebox, ttk
+from deep_translator import GoogleTranslator
+import speech_recognition as sr
+from PIL import Image
+
+class HighCourt:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Court Case Information System")
+        self.root.geometry("1000x800")  # Increased size to accommodate table
+
+        # Set customtkinter appearance
+        ctk.set_appearance_mode("light")  # Options: "light", "dark", "system"
+        ctk.set_default_color_theme("blue")  # Options: "blue", "green", "dark-blue"
+
+        # Load court database
+        self.load_court_database()
+        
+        ### Create main frame
+        self.main_frame = ctk.CTkFrame(root)
+        self.main_frame.pack(fill="both", expand=True)
+
+        # Add heading above the title
+        self.heading_label = ctk.CTkLabel(
+            self.main_frame,
+            text="High Court Case Management System",
+            font=ctk.CTkFont(size=38, weight="bold"),
+            text_color="blue",  # Blue color
+        )
+        self.heading_label.pack(fill="x", pady=10)
+
+        ### Add header image with rounded border
+        try:
+            image = Image.open("images/court02.jpg")
+            image = image.resize((840, 320), Image.Resampling.LANCZOS)
+            self.header_image = ctk.CTkImage(light_image=image, size=(840, 320))
+
+            # Create a frame to act as the border with rounded corners
+            self.image_frame = ctk.CTkFrame(
+                self.main_frame,
+                width=850,  # Slightly larger than the image for border effect
+                height=330,  # Slightly larger than the image for border effect
+                fg_color="white",  # Background color of the border
+                border_width=3,  # Thin border
+                border_color="black",  # Border color
+                corner_radius=15  # Rounded corners
+            )
+            self.image_frame.pack(padx=10, pady=10)
+
+            # Create the label inside the frame
+            self.image_label = ctk.CTkLabel(self.image_frame, image=self.header_image, text="")
+            self.image_label.pack(padx=5, pady=5)  # Padding to center inside the border frame
+
+        except Exception as e:
+            print(f"Could not load image: {e}")
+            self.image_label = ctk.CTkLabel(self.main_frame, text="Header Image", height=10)
+            self.image_label.pack(fill="x", pady=10)
+        
+        # Label for the text input box
+        self.text_input_label = ctk.CTkLabel(self.main_frame, text="Enter Case Number", font=ctk.CTkFont(size=28, weight="bold"))
+        self.text_input_label.pack(padx=(5, 5))  # Padding between label and text input
+        
+        # ==========================================================================================================================
+        # Create a frame to hold the text input and mic button on the same line
+        self.input_frame = ctk.CTkFrame(self.main_frame)
+        self.input_frame.pack(padx=10, pady=10)
+
+        # Text input box with height and width
+        self.text_input = ctk.CTkEntry(self.input_frame, font=ctk.CTkFont(size=24, weight="bold"), width=640, height=60)  # Set height
+        self.text_input.pack(side="left", padx=(10, 10))  # Padding between text input and mic button
+
+        # Load the image for the microphone button
+        try:
+            mic_image = Image.open("images/mic2.png")  # Replace with your image path
+            mic_image = mic_image.resize((50, 50), Image.Resampling.LANCZOS)  # Resize image if needed
+            mic_image = ctk.CTkImage(light_image=mic_image, size=(50, 50))  # Convert to CTkImage
+        except Exception as e:
+            print(f"Could not load microphone image: {e}")
+            mic_image = None
+
+        # Microphone button with image as button (no text)
+        self.mic_button = ctk.CTkButton(
+            self.input_frame,
+            command=self.listen_and_speak,
+            fg_color="black",  # Background color if needed
+            height=60,
+            width=60,  # Make button the same size as the image
+            corner_radius=20,
+            image=mic_image,  # Use image as the button
+            text=""
+        )
+        self.mic_button.pack(side="right", padx=10, pady=10)
+        # ======================================================================================================
+        
+        # Bind the Entry widget to update table on text change
+        self.text_input.bind('<KeyRelease>', self.on_text_change)
+
+        # Buttons for speaking in different languages
+        self.button_frame = ctk.CTkFrame(self.main_frame)
+        self.button_frame.pack(padx=10, pady=10)
+
+        self.english_button = ctk.CTkButton(
+            self.button_frame,
+            text="Speak English",
+            command=lambda: self.process_case_number(self.text_input.get(), "en"),
+            font=ctk.CTkFont(size=24, weight="bold"),
+            fg_color="#573AC0",
+            text_color="white",
+            height=80,
+            width=240,
+            corner_radius=20
+        )
+        self.english_button.pack(side="left", padx=20, pady=10)
+
+        self.hindi_button = ctk.CTkButton(
+            self.button_frame,
+            text="हिंदी बोलें",
+            command=lambda: self.process_case_number(self.translate_text(self.text_input.get(), source='en', target='hi'), "hi"),
+            font=ctk.CTkFont(size=24, weight="bold"),
+            fg_color="#573AC0",
+            text_color="white",
+            height=80,
+            width=240,
+            corner_radius=20
+        )
+        self.hindi_button.pack(side="left", padx=20, pady=10)
+
+        self.punjabi_button = ctk.CTkButton(
+            self.button_frame,
+            text="ਹਿੰਦੀ ਬੋਲੋ",
+            command=lambda: self.process_case_number(self.translate_text(self.text_input.get(), source='en', target='pa'), "pa"),
+            font=ctk.CTkFont(size=24, weight="bold"),
+            fg_color="#573AC0",
+            text_color="white",
+            height=80,
+            width=240,
+            corner_radius=20
+        )
+        self.punjabi_button.pack(side="left", padx=20, pady=10)
+        
+        # Create a frame to act as a solid border
+        self.subtitle_frame = ctk.CTkFrame(
+            self.main_frame,
+            width=550,
+            height=100,
+            fg_color="yellow",  # Border color
+            border_width=3,  # Solid border thickness
+            border_color="green",  # Ensures a solid green border
+            corner_radius=5 
+        )
+        self.subtitle_frame.pack(pady=20, padx=20)  # Pack the frame
+
+        # Create a label inside the frame
+        self.subtitle_label = ctk.CTkLabel(
+            self.subtitle_frame,
+            text="",
+            width=840,  # Slightly smaller than frame to reveal border
+            height=240,  # Slightly smaller to reveal border
+            font=ctk.CTkFont(size=24, weight="bold"),
+            text_color="red",
+            fg_color="skyblue",  # Actual label background color
+            wraplength=530,
+            padx=10,
+            pady=10
+        )
+        self.subtitle_label.pack(padx=3, pady=3)
+
+        # Add table for case details
+        self.create_case_table()
+
+        # Initialize translators
+        self._translators = {}
+        
+        # Map button to open map image
+        self.map_button = ctk.CTkButton(
+            self.main_frame,
+            text="Map",
+            command=self.open_map,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="teal",
+            text_color="white",
+            height=60,
+            width=240,
+            corner_radius=20
+        )
+        self.map_button.pack(padx=10, pady=10)
+
+    def load_court_database(self):
+        """Load the court database from a JSON file."""
+        try:
+            with open("case_database.json", "r", encoding="utf-8") as file:
+                self.court_database = json.load(file)
+        except FileNotFoundError:
+            print("Court database file not found. Using a sample database.")
+            self.court_database = [
+                {
+                    "case_number": "2025-001",
+                    "case": "John Doe vs. State",
+                    "court_number": "Court 1",
+                    "judge_name": "Judge Smith"
+                },
+                {
+                    "case_number": "2025-002",
+                    "case": "Jane Doe vs. State",
+                    "court_number": "Court 2",
+                    "judge_name": "Judge Brown"
+                },
+                {
+                    "case_number": "2025-003",
+                    "case": "Alice vs. Bob",
+                    "court_number": "Court 3",
+                    "judge_name": "Judge White"
+                }
+            ]
+
+    def create_case_table(self):
+        # Create frame for table
+        table_frame = ctk.CTkFrame(self.main_frame)
+        table_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Create table with Treeview
+        columns = ("Case Number", "Case Title", "Court Number", "Judge Name")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=10)
+
+        # Configure column headings
+        for col in columns:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=200)
+
+        # Style the table
+        style = ttk.Style()
+        style.configure("Treeview.Heading", font=('Helvetica', 10, 'bold'))
+        style.configure("Treeview", font=('Helvetica', 10), rowheight=25)
+
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+
+        # Pack the table and scrollbar
+        self.tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+    def on_text_change(self, event=None):
+        """Update table when text input changes"""
+        case_number = self.text_input.get()
+        self.update_table(case_number)
+
+    def update_table(self, search_case_number=None):
+        # Clear existing items
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        if not search_case_number:
+            return
+
+        # Format the search number
+        digits_only = ''.join(filter(str.isdigit, search_case_number))
+        if not digits_only:
+            return
+        
+        formatted_number = f"2025-{digits_only.zfill(3)}"
+
+        # Add only the matching case
+        for case in self.court_database:
+            if case['case_number'] == formatted_number:
+                self.tree.insert("", "end", values=(
+                    case['case_number'],
+                    case['case'],
+                    case['court_number'],
+                    case['judge_name']
+                ))
+                break
+
+    def process_case_number(self, case_number, lang="en"):
+        case_details = self.find_case_details(case_number)
+        if case_details:
+            case_details = self.translate_text(case_details, source='en', target=lang)
+            self.speak_text(case_details, lang)
+        else:
+            self.speak_text("Case not found.", lang)
+        # Update the table when processing a case number
+        self.update_table(case_number)
+
+    def find_case_details(self, case_number):
+        """Find case details based on the case number."""
+        digits_only = ''.join(filter(str.isdigit, case_number))
+        if not digits_only:
+            return None
+        
+        formatted_number = f"2025-{digits_only.zfill(3)}"
+        for case in self.court_database:
+            if case['case_number'] == formatted_number:
+                return f"Case Number: {case['case_number']}, Case Title: {case['case']}, Court Number: {case['court_number']}, Judge Name: {case['judge_name']}"
+        return None
+
+    def translate_text(self, text, source, target):
+        """Translate text from source language to target language."""
+        key = (source, target)
+        if key not in self._translators:
+            self._translators[key] = GoogleTranslator(source=source, target=target)
+        try:
+            return self._translators[key].translate(text)
+        except Exception as e:
+            print(f"Translation error: {e}")
+            return text
+
+    def speak_text(self, text, lang="en"):
+        try:
+            if os.path.exists("speech.mp3"):
+                os.remove("speech.mp3")
+            tts = gTTS(text=text, lang=lang)
+            tts.save("speech.mp3")
+            pygame.mixer.init()
+            pygame.mixer.music.load("speech.mp3")
+            audio = pygame.mixer.Sound("speech.mp3")
+            total_duration = audio.get_length()
+            words = text.split()
+            num_words = len(words)
+            duration_per_word = total_duration / num_words
+            pygame.mixer.music.play()
+
+            # Print words in real-time and update the GUI
+            self.subtitle_label.configure(text="")
+            for word in words:
+                self.subtitle_label.configure(text=self.subtitle_label.cget("text") + " " + word)
+                self.root.update()
+                time.sleep(duration_per_word)
+
+            # Clear the subtitle after the audio finishes
+            self.root.update()
+
+            while pygame.mixer.music.get_busy():
+                pygame.time.Clock().tick(10)
+
+            pygame.mixer.quit()
+        except Exception as e:
+            print(f"Text-to-speech error: {e}")
+
+    def listen_and_speak(self):
+        self.speak_text("Kindly tell me your case number. ", lang='en')
+        recognizer = sr.Recognizer()
+        with sr.Microphone() as source:
+            try:
+                recognizer.adjust_for_ambient_noise(source)
+                self.subtitle_label.configure(text="Listening for case number...")
+                self.root.update()
+                audio = recognizer.listen(source, timeout=5)
+
+                recognized_text = recognizer.recognize_google(audio)
+                self.text_input.delete(0, ctk.END)
+                self.text_input.insert(0, recognized_text)
+                self.root.update()
+                self.subtitle_label.configure(text="")
+                
+                # Process the recognized case number
+                self.process_case_number(recognized_text, "en")
+            except sr.UnknownValueError:
+                messagebox.showerror("Error", "Could not understand audio")
+            except sr.RequestError as e:
+                messagebox.showerror("Error", f"Could not request results; {e}")
+            except Exception as e:
+                messagebox.showerror("Error", f"An error occurred: {e}")
+
+    def open_map(self):
+        """Open the map image corresponding to the case number."""
+        case_number = self.text_input.get()
+        if not case_number:
+            messagebox.showwarning("Warning", "Please enter a case number.")
+            return
+
+        # Format the case number
+        digits_only = ''.join(filter(str.isdigit, case_number))
+        if not digits_only:
+            messagebox.showwarning("Warning", "Invalid case number.")
+            return
+        
+        formatted_number = f"2025-{digits_only.zfill(3)}"
+        map_filename = f"images/map_{formatted_number}.jpg"
+
+        if not os.path.exists(map_filename):
+            messagebox.showerror("Error", f"Map file not found for case number: {formatted_number}")
+            return
+
+        # Open the map image in a new window
+        map_window = ctk.CTkToplevel(self.root)
+        map_window.title(f"Map for Case {formatted_number}")
+        try:
+            map_image = Image.open(map_filename)
+            map_image = map_image.resize((720, 480), Image.Resampling.LANCZOS)
+            map_ctk_image = ctk.CTkImage(light_image=map_image, size=(720, 480))
+            map_label = ctk.CTkLabel(map_window, image=map_ctk_image, text="")
+            map_label.image = map_ctk_image  # Keep a reference to avoid garbage collection
+            map_label.pack()
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not load map image: {e}")
+
+
+if __name__ == "__main__":
+    root = ctk.CTk()
+    tts = HighCourt(root)
+    root.mainloop()

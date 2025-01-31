@@ -9,6 +9,7 @@ from PIL import Image, ImageTk
 from gtts import gTTS
 from mutagen.mp3 import MP3
 from deep_translator import GoogleTranslator
+import pygame
 
 class Conversation:
     def __init__(self):
@@ -26,11 +27,25 @@ class Conversation:
 
     def speak_text(self, text, lang="en"):
         try:
+            # Remove existing file if it exists
             if os.path.exists("speech.mp3"):
                 os.remove("speech.mp3")
+
+            # Convert text to speech and save as MP3
             tts = gTTS(text=text, lang=lang)
             tts.save("speech.mp3")
-            os.system("start speech.mp3")
+
+            # Initialize pygame mixer
+            pygame.mixer.init()
+            pygame.mixer.music.load("speech.mp3")
+            pygame.mixer.music.play()
+
+            # Wait until the audio finishes playing
+            while pygame.mixer.music.get_busy():
+                pygame.time.Clock().tick(10)  # Add a small delay to avoid high CPU usage
+
+            # Clean up
+            pygame.mixer.quit()
         except Exception as e:
             print(f"Text-to-speech error: {e}")
     
