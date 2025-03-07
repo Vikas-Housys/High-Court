@@ -10,13 +10,17 @@ import speech_recognition as sr
 from PIL import Image
 import cv2
 import threading
+import requests
 import re
 from difflib import get_close_matches
-import requests
+import winsound
 
 class HighCourt:
     # =========================================== Constructore ==========================================
     def __init__(self, root):
+        self.start_sound = "C:\\Windows\\Media\\chimes.wav"
+        self.end_sound = "C:\\Windows\\Media\\notify.wav"
+
         self.root = root
         self.root.attributes("-fullscreen", True)
         self.root.title("Court Case Information System")
@@ -27,6 +31,8 @@ class HighCourt:
         pygame.mixer.init()
         self.load_auth_data()
 
+        self.camera_pause=False
+
         # Create main frame
         self.main_frame = ctk.CTkFrame(root, fg_color="transparent")
         self.main_frame.pack(fill="both", expand=True)
@@ -34,7 +40,7 @@ class HighCourt:
         # Add heading above the title
         self.heading_label = ctk.CTkLabel(
             self.main_frame,
-            text="Session Court Case Management",
+            text="ਸੈਸ਼ਨ ਕੋਰਟ ਕੇਸ ਪ੍ਰਬੰਧਨ",
             font=ctk.CTkFont(size=38, weight="bold"),
             text_color="blue",  # Blue color
         )
@@ -68,7 +74,7 @@ class HighCourt:
 
         # Label for the text input box
         self.text_input_label = ctk.CTkLabel(self.main_frame, 
-                                            text="Search", 
+                                            text="ਖੋਜ", 
                                             font=ctk.CTkFont(size=28, weight="bold"))
         self.text_input_label.pack(padx=10, pady=10)
 
@@ -181,7 +187,7 @@ class HighCourt:
         # Create a label inside the frame
         self.subtitle_label = ctk.CTkLabel(
             self.subtitle_frame,
-            text="Case details",
+            text="ਕੇਸ ਦੇ ਵੇਰਵੇ",
             width=940,
             height=280,
             font=ctk.CTkFont(size=22, weight="bold"),
@@ -209,7 +215,7 @@ class HighCourt:
             text="Close",
             command=self.show_password_popup,
             font=ctk.CTkFont(size=24, weight="bold"),
-            fg_color="maroon",  # Red color for close button
+            fg_color="maroon", 
             text_color="white",
             height=60,
             width=180,
@@ -219,13 +225,13 @@ class HighCourt:
         )
         self.close_button.pack(side="left", padx=10, pady=10)
         
-        # Add Reset and Close buttons
+        # Reset button
         self.reset_button = ctk.CTkButton(
             self.last_button_frame,
             text="Reset",
             command=self.reset_application,
             font=ctk.CTkFont(size=24, weight="bold"),
-            fg_color="green",  # Red color for reset button
+            fg_color="green",
             text_color="white",
             height=60,
             width=180,
@@ -284,6 +290,7 @@ class HighCourt:
             "WTR": "WEALTH TAX REFERENCE", "XOBJ": "CROSS OBJECTION", "XOBJC": "CROSS OBJECTION IN CR",
             "XOBJL": "CROSS OBJECTION IN LPA", "XOBJR": "CROSS OBJECTION IN RFA", "XOBJS": "CROSS OBJECTION IN RSA",
         }
+    
     # ===================================================================================================
 
     # ========================================= face detection ==========================================
@@ -305,6 +312,10 @@ class HighCourt:
         max_face_size = (240, 240)
         
         while self.is_running:
+            if self.camera_pause:
+                time.sleep(0.1)
+                continue
+
             ret, frame = self.cap.read()
             if not ret:
                 time.sleep(0.1)
@@ -407,7 +418,8 @@ class HighCourt:
             
             # Small delay to reduce CPU usage
             time.sleep(0.03)  # ~30 FPS
-    
+            
+
     def prompt_for_case_number(self):
         """Prompt the user for case number after face detection"""
         if not self.face_detected:
@@ -422,6 +434,7 @@ class HighCourt:
             
         # Schedule cooldown reset after 10 seconds
         self.root.after(10000, reset_cooldown)
+    
     # ===================================================================================================
 
     # ========================================= authentication ==========================================
@@ -432,6 +445,8 @@ class HighCourt:
             self.detection_thread.join(timeout=1.0)
         if self.cap is not None:
             self.cap.release()
+        if pygame.mixer.get_init() is not None:
+            pygame.mixer.quit()
         self.root.destroy()
 
     def show_password_popup(self):
@@ -557,10 +572,16 @@ class HighCourt:
             ]
 
     def reset_application(self):
-        """Reset the application by clearing the input and table."""
-        self.text_input.delete(0, ctk.END)
+        """Stop all running and pending operations, and restart the application as fresh."""
+        # Stop any ongoing audio playback
+        if pygame.mixer.get_init() is not None:
+            pygame.mixer.music.stop()
+            pygame.mixer.quit()
+        
+        # Clear the subtitle label and text input
         self.subtitle_label.configure(text="")
-        self.update_table("")  # Clear the table
+        self.text_input.delete(0, ctk.END)
+        self.update_table("")
 
     def load_image(self, path, size):
         """Load and resize an image."""
@@ -571,8 +592,9 @@ class HighCourt:
         except Exception as e:
             print(f"Could not load image: {e}")
             return None
+        
     # ===================================================================================================
-
+    
     # ========================================== main keyboard ==========================================
     def create_numeric_keypad(self):
         """Create a full keyboard with alphanumeric keys."""
@@ -599,9 +621,9 @@ class HighCourt:
                     font=ctk.CTkFont(size=28, weight="bold"),
                     width=80,
                     height=60,
-                    fg_color="#71461d",
+                    fg_color="black",
                     border_width=2,
-                    border_color="black",
+                    border_color="red",
                     corner_radius=40,
                     command=lambda k=key: self.append_to_input(k)
                 )
@@ -617,9 +639,9 @@ class HighCourt:
             font=ctk.CTkFont(size=28, weight="bold"),
             width=80,
             height=60,
-            fg_color="#71461d",
+            fg_color="black",
             border_width=2,
-            border_color="black",
+            border_color="red",
             corner_radius=40,
             command=lambda: self.append_to_input('@')
         )
@@ -632,9 +654,9 @@ class HighCourt:
             font=ctk.CTkFont(size=24, weight="bold"),
             width=180,
             height=60,
-            fg_color="Crimson",
+            fg_color="black",
             border_width=2,
-            border_color="black",
+            border_color="red",
             corner_radius=40,
             command=self.remove_last_character
         )
@@ -647,9 +669,9 @@ class HighCourt:
             font=ctk.CTkFont(size=24, weight="bold"),
             width=180,
             height=60,
-            fg_color="brown",
+            fg_color="black",
             border_width=2,
-            border_color="black",
+            border_color="red",
             corner_radius=40,
             command=lambda: self.append_to_input(' ')
         )
@@ -662,9 +684,9 @@ class HighCourt:
             font=ctk.CTkFont(size=24, weight="bold"),
             width=180,
             height=60,
-            fg_color="darkgreen",
+            fg_color="black",
             border_width=2,
-            border_color="black",
+            border_color="red",
             corner_radius=40,
             command=lambda: self.process_case_details(self.text_input.get(), "en")
         )
@@ -677,9 +699,9 @@ class HighCourt:
             font=ctk.CTkFont(size=24, weight="bold"),
             width=180,
             height=60,
-            fg_color="orange",
+            fg_color="black",
             border_width=2,
-            border_color="black",
+            border_color="red",
             corner_radius=40,
             command=self.clear_input
         )
@@ -692,9 +714,9 @@ class HighCourt:
             font=ctk.CTkFont(size=28, weight="bold"),
             width=80,
             height=60,
-            fg_color="#71461d",
+            fg_color="black",
             border_width=2,
-            border_color="black",
+            border_color="red",
             corner_radius=40,
             command=lambda: self.append_to_input('&')
         )
@@ -709,13 +731,14 @@ class HighCourt:
     def remove_last_character(self):
         """Remove the last character from the text input."""
         current_text = self.text_input.get()
-        if current_text:  # Check if there is text to remove
+        if current_text:
             self.text_input.delete(0, ctk.END)
             self.text_input.insert(0, current_text[:-1])  # Remove the last character
 
     def clear_input(self):
         """Clear the entire text input."""
         self.text_input.delete(0, ctk.END)
+    
     # ===================================================================================================
     
     # ======================================== case table ===============================================
@@ -730,7 +753,7 @@ class HighCourt:
 
         ### Case Number
         # Create a StringVar to hold the case number
-        self.case_id_var = ctk.StringVar(value="Case Id: ")  # Default text
+        self.case_id_var = ctk.StringVar(value="ਕੇਸ ਆਈ.ਡੀ: ")
 
         # Label for the text input box
         self.text_input_label = ctk.CTkLabel(
@@ -744,7 +767,7 @@ class HighCourt:
         self.text_input_label.pack(padx=5, pady=5)
 
         # Create table with Treeview
-        columns = ("Case ID", "Petitioner Name", "Respondent Name", "Advocate Name", "Status", "Next Date")
+        columns = ("ਕੇਸ ਆਈਡੀ", "ਪਟੀਸ਼ਨਰ ਦਾ ਨਾਮ", "ਜਵਾਬਦੇਹ ਦਾ ਨਾਮ", "ਵਕੀਲ ਦਾ ਨਾਮ", "ਸਥਿਤੀ", "ਅਗਲੀ ਤਾਰੀਖ")
         self.tree = ttk.Treeview(self.table_frame, columns=columns, show="headings", height=10)
 
         # Configure column headings to be centered
@@ -754,8 +777,8 @@ class HighCourt:
 
         # Style the table
         style = ttk.Style()
-        style.configure("Treeview.Heading", font=('Helvetica', 14, 'bold'), foreground="black", anchor="center")
-        style.configure("Treeview", font=('Helvetica', 14, 'bold'), foreground="blue", rowheight=25, anchor="center")
+        style.configure("Treeview.Heading", font=('Helvetica', 12, 'bold'), foreground="black", anchor="center")
+        style.configure("Treeview", font=('Helvetica', 12, 'bold'), foreground="blue", rowheight=25, anchor="center")
 
         self.tree.pack(side="left", fill="both", expand=True)
     
@@ -770,35 +793,47 @@ class HighCourt:
             self.tree.delete(item)
         
         if isinstance(case_details, dict):
-            self.case_id_var.set(f"Case Number: {case_details['case_id']}")
+            self.case_id_var.set(f"ਕੇਸ ਨੰਬਰ: {case_details['case_id']}")
             self.tree.insert("", "end", values=(
                 case_details['case_id'],
-                case_details['petitioner_name'],
-                case_details['respondent_name'],
-                case_details['advocate_name'],
-                case_details['status'],
+                self.translate_text(case_details['petitioner_name'], source='en', target='pa'),
+                self.translate_text(case_details['respondent_name'], source='en', target='pa'),
+                self.translate_text(case_details['advocate_name'], source='en', target='pa'),
+                self.translate_text(case_details['status'], source='en', target='pa'),
                 case_details['next_date']
             ))
         elif isinstance(case_details, str):
-            self.case_id_var.set(f"Case Number: {case_details}")
+            self.case_id_var.set(f"ਕੇਸ ਨੰਬਰ: {case_details}")
         else:
-            self.case_id_var.set("Case Number: Not Found")
+            self.case_id_var.set("ਕੇਸ ਨੰਬਰ: ਨਹੀਂ ਲਭਿਆ")
 
     def process_case_details(self, case_id, lang="en"):
-        BASE_URL = "http://127.0.0.1:8000/cases"
+        self.camera_pause=True
+        
+        BASE_URL = "http://192.168.1.12:8000/cases"
 
-        def get_case_details(case_id):
-            try:
-                response = requests.get(f"{BASE_URL}/{case_id}")
-                if response.status_code == 200:
-                    return response.json()
-                else:
+        # Check if the case details are already cached
+        if hasattr(self, 'case_cache') and case_id in self.case_cache:
+            case_details = self.case_cache[case_id]
+        else:
+            def get_case_details(case_id):
+                try:
+                    response = requests.get(f"{BASE_URL}/{case_id}")
+                    if response.status_code == 200:
+                        return response.json()
+                    else:
+                        return None
+                except requests.exceptions.RequestException as e:
+                    print(f"Error fetching case details: {e}")
                     return None
-            except requests.exceptions.RequestException as e:
-                print(f"Error fetching case details: {e}")
-                return None
 
-        case_details = get_case_details(case_id)
+            case_details = get_case_details(case_id)
+            if case_details:
+                # Cache the case details
+                if not hasattr(self, 'case_cache'):
+                    self.case_cache = {}
+                self.case_cache[case_id] = case_details
+
         if case_details:
             case_details_sentence = f"""
             Your case details are as follows: Case Type - {case_details['case_type']}, Case Number - {case_details['case_no']}, and Filing Year - {case_details['case_year']}. 
@@ -812,50 +847,12 @@ class HighCourt:
             self.speak_text("Case not found.", lang)
 
         self.update_table(case_details)
+
+        self.camera_pause = False
+        
     # ===================================================================================================
 
     #  ================================ language Speak and Translate ====================================
-    def get_case_numbers(self, text=""):
-        """Extracts, formats, and validates case numbers from the given text."""
-        case_types = self.case_types
-
-        valid_years = {str(y) for y in range(1600, 2201)}
-        
-        def validate_case_type(case_type):
-            if case_type in case_types:
-                return case_type
-            else:
-                matches = get_close_matches(case_type, case_types.keys(), n=1, cutoff=0.6)
-                return matches[0] if matches else None
-        
-        # Patterns to match different case number formats
-        pattern_hyphenated = r'\b([A-Z]+(?:-[A-Z]+)*)-(\d{3,6})-(1[6-9]\d{2}|20\d{2}|21\d{2}|2200)\b'
-        pattern_unformatted = r'\b([A-Z]+)\s?(\d{3,6})\s?(1[6-9]\d{2}|20\d{2}|21\d{2}|2200)\b'
-        pattern_blocked = r'\b([A-Z]+)(\d{3,6})(1[6-9]\d{2}|20\d{2}|21\d{2}|2200)\b'
-        
-        case_id = set()
-        
-        # Extract and validate cases
-        for match in re.findall(pattern_hyphenated, text):
-            case_type, case_no, case_year = match
-            case_type_valid = validate_case_type(case_type)
-            if case_type_valid and case_year in valid_years:
-                case_id.add(f"{case_type_valid}-{case_no}-{case_year}")
-        
-        for match in re.findall(pattern_unformatted, text):
-            case_type, case_no, case_year = match
-            case_type_valid = validate_case_type(case_type)
-            if case_type_valid and case_year in valid_years:
-                case_id.add(f"{case_type_valid}-{case_no}-{case_year}")
-        
-        for match in re.findall(pattern_blocked, text):
-            case_type, case_no, case_year = match
-            case_type_valid = validate_case_type(case_type)
-            if case_type_valid and case_year in valid_years:
-                case_id.add(f"{case_type_valid}-{case_no}-{case_year}")
-        
-        return sorted(case_id)    
-    
     def translate_text(self, text, source, target):
         """Translate text from source language to target language."""
         key = (source, target)
@@ -868,37 +865,52 @@ class HighCourt:
             return text
 
     def speak_text(self, text, lang="en"):
+        """
+        Convert text to speech and play it using gTTS and pygame.
+        This method has been optimized to reduce resource usage and improve performance.
+        """
         try:
             # Remove the existing file if it exists
             if os.path.exists("speech.mp3"):
                 os.remove("speech.mp3")
 
-            # Generate the speech file
+            # Generate the speech file using gTTS
             tts = gTTS(text=text, lang=lang)
             tts.save("speech.mp3")
 
-            # Initialize pygame mixer
-            pygame.mixer.init()
+            # Initialize pygame mixer if not already initialized
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+
+            # Load the speech file into pygame mixer
             pygame.mixer.music.load("speech.mp3")
-            audio = pygame.mixer.Sound("speech.mp3")
-            total_duration = audio.get_length()
-            words = text.split()
-            num_words = len(words)
-            duration_per_word = total_duration / max(num_words, 1)
 
             # Play the audio
             pygame.mixer.music.play()
 
-            # Print words in real-time and update the GUI
-            if self.root and self.subtitle_label.winfo_exists():  # Check if the widget still exists
+            # Calculate the total duration of the audio
+            audio = pygame.mixer.Sound("speech.mp3")
+            total_duration = audio.get_length()
+
+            # Split the text into words for real-time display
+            words = text.split()
+            num_words = len(words)
+            duration_per_word = total_duration / max(num_words, 1)  # Avoid division by zero
+
+            # Clear the subtitle label before starting
+            if self.root and self.subtitle_label.winfo_exists():
                 self.subtitle_label.configure(text="")
                 self.root.update()
 
+            # Start time for tracking word display
             start_time = time.time()
 
+            # Display words in real-time as the audio plays
             for word in words:
-                if self.root and self.subtitle_label.winfo_exists():  # Check if the widget still exists
-                    self.subtitle_label.configure(text=self.subtitle_label.cget("text") + " " + word)
+                if self.root and self.subtitle_label.winfo_exists():
+                    # Append the current word to the subtitle label
+                    current_text = self.subtitle_label.cget("text")
+                    self.subtitle_label.configure(text=current_text + " " + word)
                     self.root.update()
 
                 # Calculate the elapsed time and sleep accordingly
@@ -907,37 +919,38 @@ class HighCourt:
                 sleep_time = max(0, expected_time - elapsed_time)
                 time.sleep(sleep_time)
 
-            # Clear the subtitle after the audio finishes
-            if self.root and self.subtitle_label.winfo_exists():  # Check if the widget still exists
-                self.root.update()
-
             # Wait for the audio to finish playing
             while pygame.mixer.music.get_busy():
-                pygame.time.Clock().tick(10)
+                pygame.time.Clock().tick(10)  # Limit the loop to 10 FPS to reduce CPU usage
 
-            # Clean up
+            # Clean up pygame mixer
             pygame.mixer.quit()
+
         except Exception as e:
             print(f"Text-to-speech error: {e}")
-        
-        finally:
-            # Clear the subtitle after the audio finishes
-            if self.root or self.subtitle_label.winfo_exists():  # Check if the widget still exists
-                self.root.update()
 
+        finally:
+            # Clear the subtitle label after the audio finishes
+            if self.root and self.subtitle_label.winfo_exists():
+                self.subtitle_label.configure(text="")
+                self.root.update()
+        
+    
     def listen(self, lang="en"):
         """Listen for user input and return the recognized text."""
         recognizer = sr.Recognizer()
 
         with sr.Microphone() as source:
             try:
+                winsound.PlaySound(self.start_sound, winsound.SND_FILENAME)
                 recognizer.adjust_for_ambient_noise(source)
                 self.subtitle_label.configure(text="Listening...")
                 self.root.update()
 
+                # Reduce listening time to 5 seconds
                 audio = recognizer.listen(source, timeout=5)
                 recognized_text = recognizer.recognize_google(audio, language=lang)
-
+                winsound.PlaySound(self.end_sound, winsound.SND_FILENAME)
                 return recognized_text
 
             except sr.UnknownValueError:
@@ -948,6 +961,7 @@ class HighCourt:
                 messagebox.showerror("Error", f"An error occurred: {e}")
 
         return ""
+    
     # ===================================================================================================
 
     # ======================================= listen case id ============================================
@@ -961,7 +975,6 @@ class HighCourt:
         return text
 
     def map_spoken_numbers(self, text, lang='en'):
-        # Mapping for Punjabi numbers
         self.punjabi_numbers = {
             "੦": "0", "੧": "1", "੨": "2", "੩": "3", "੪": "4",
             "੫": "5", "੬": "6", "੭": "7", "੮": "8", "੯": "9",
@@ -969,7 +982,6 @@ class HighCourt:
             "ਪੰਜ": "5", "ਛੇ": "6", "ਸੱਤ": "7", "ਅੱਠ": "8", "ਨੌਂ": "9"
         }
 
-        # Mapping for Hindi numbers
         self.hindi_numbers = {
             "०": "0", "१": "1", "२": "2", "३": "3", "४": "4",
             "५": "5", "६": "6", "७": "7", "८": "8", "९": "9",
@@ -977,13 +989,11 @@ class HighCourt:
             "पांच": "5", "छह": "6", "सात": "7", "आठ": "8", "नौ": "9"
         }
 
-        # Mapping for English numbers
         self.english_numbers = {
             "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
             "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9"
         }
 
-        # Combine all mappings based on the language
         if lang == 'pa':
             number_mapping = self.punjabi_numbers
         elif lang == 'hi':
@@ -991,7 +1001,6 @@ class HighCourt:
         else:
             number_mapping = self.english_numbers
 
-        # Replace spoken numbers with their numeric equivalents
         for word, num in number_mapping.items():
             text = text.replace(word, num)
 
@@ -1001,32 +1010,34 @@ class HighCourt:
         recognizer = sr.Recognizer()
 
         with sr.Microphone() as source:
-            recognizer.adjust_for_ambient_noise(source, duration=2)
+            winsound.PlaySound(self.start_sound, winsound.SND_FILENAME)
+            recognizer.adjust_for_ambient_noise(source, duration=1)
             audio = recognizer.listen(source)
 
             try:
-                # Recognize the speech input
                 recognized_text = recognizer.recognize_google(audio)
-
-                # Convert recognized text to uppercase for case-insensitive matching
                 recognized_text = recognized_text.upper()
-                print(f"Case Type: {recognized_text}")
+                print(f"Recognized case type: {recognized_text}")
 
-                # Check if the recognized text matches a key or value in the case_types dictionary
-                for key, value in case_types.items():
-                    if recognized_text == key.upper() or recognized_text == value.upper():
-                        return key  # Return the abbreviation (key)
+                closest_match = get_close_matches(recognized_text, case_types.keys(), n=1, cutoff=0.6)
+                winsound.PlaySound(self.end_sound, winsound.SND_FILENAME)
+                
+                if closest_match:
+                    return closest_match[0]
+                else:
+                    for key, value in case_types.items():
+                        if recognized_text == value.upper():
+                            return key
 
-                # If no match is found, display an error message
-                print(f"Invalid case type: {recognized_text}. Valid case types are: {list(case_types.keys())}")
-                return None
+                    print(f"Invalid case type: {recognized_text}. Valid case types are: {list(case_types.keys())}")
+                    return None
 
             except sr.UnknownValueError:
-                messagebox.showerror("Sorry, I could not understand the audio.")
+                self.subtitle_label.configure(text="Sorry, I could not understand the audio."); self.root.update()
             except sr.RequestError as e:
-                messagebox.showerror(f"Could not request results from the speech recognition service; {e}")
+                self.subtitle_label.configure(text=f"Could not request results from the speech recognition service; {e}"); self.root.update()
             except Exception as e:
-                messagebox.showerror(f"An error occurred: {e}")
+                self.subtitle_label.configure(text=f"An error occurred: {e}"); self.root.update()
 
             return None
 
@@ -1034,33 +1045,49 @@ class HighCourt:
         recognizer = sr.Recognizer()
 
         with sr.Microphone() as source:
-            recognizer.adjust_for_ambient_noise(source, duration=2)
+            winsound.PlaySound(self.start_sound, winsound.SND_FILENAME)
+            recognizer.adjust_for_ambient_noise(source, duration=1)
             audio = recognizer.listen(source)
 
             try:
-                # Recognize the speech input
                 recognized_text = recognizer.recognize_google(audio, language=lang)
+                print(f"Recognized case number: {recognized_text}")
 
-                # Map spoken numbers to numeric equivalents
                 recognized_text = self.map_spoken_numbers(recognized_text, lang)
-
-                # Replace common misinterpretations (e.g., "O" with "0")
                 recognized_text = recognized_text.replace("O", "0").replace("o", "0")
-                print(f"Case Number: {recognized_text}")
+                recognized_text = recognized_text.replace(" ", "-")
 
-                # Validate the case number (must be numeric)
-                if recognized_text.isdigit():
-                    return recognized_text
+                winsound.PlaySound(self.end_sound, winsound.SND_FILENAME)
+
+                parts = recognized_text.split("-")
+                numeric_part = ""
+                alphanumeric_part = ""
+
+                for part in parts:
+                    if part.isdigit():
+                        numeric_part = part
+                    else:
+                        alphanumeric_part = part.upper()
+
+                if not numeric_part:
+                    print(f"Invalid case number: {recognized_text}. Numeric part is missing.")
+                    return None
+
+                structured_case_number = f"{numeric_part}-{alphanumeric_part}" if alphanumeric_part else numeric_part
+
+                if re.match(r'^\d+(-\w+)?$', structured_case_number):
+                    return structured_case_number
                 else:
-                    print(f"Invalid case number: {recognized_text}. Case number must be numeric.")
+                    print(f"Invalid case number: {structured_case_number}. Case number must be in the format 'XXXX-XXX' or 'XXXX'.")
                     return None
 
             except sr.UnknownValueError:
-                messagebox.showerror("Sorry, I could not understand the audio.")
+                self.subtitle_label.configure(text="Sorry, I could not understand the audio."); self.root.update()
             except sr.RequestError as e:
-                messagebox.showerror(f"Could not request results from the speech recognition service; {e}")
+                self.subtitle_label.configure(text=f"Could not request results from the speech recognition service; {e}"); self.root.update()
             except Exception as e:
-                messagebox.showerror(f"An error occurred: {e}")
+                print()
+                self.subtitle_label.configure(text=f"An error occurred: {e}"); self.root.update()
 
             return None
 
@@ -1068,21 +1095,17 @@ class HighCourt:
         recognizer = sr.Recognizer()
 
         with sr.Microphone() as source:
-            recognizer.adjust_for_ambient_noise(source, duration=2)
+            winsound.PlaySound(self.start_sound, winsound.SND_FILENAME)
+            recognizer.adjust_for_ambient_noise(source, duration=1)
             audio = recognizer.listen(source)
 
             try:
-                # Recognize the speech input
                 recognized_text = recognizer.recognize_google(audio, language=lang)
-
-                # Map spoken numbers to numeric equivalents
                 recognized_text = self.map_spoken_numbers(recognized_text, lang)
-
-                # Replace common misinterpretations (e.g., "O" with "0")
                 recognized_text = recognized_text.replace("O", "0").replace("o", "0")
-                print(f"Case Year: {recognized_text}")
+                
+                winsound.PlaySound(self.end_sound, winsound.SND_FILENAME)
 
-                # Validate the case year (must be numeric and 4 digits)
                 if recognized_text.isdigit() and len(recognized_text) == 4:
                     return recognized_text
                 else:
@@ -1090,16 +1113,15 @@ class HighCourt:
                     return None
 
             except sr.UnknownValueError:
-                messagebox.showerror("Sorry, I could not understand the audio.")
+                self.subtitle_label.configure(text="Sorry, I could not understand the audio."); self.root.update()
             except sr.RequestError as e:
-                messagebox.showerror(f"Could not request results from the speech recognition service; {e}")
+                self.subtitle_label.configure(text=f"Could not request results from the speech recognition service; {e}"); self.root.update()
             except Exception as e:
-                messagebox.showerror(f"An error occurred: {e}")
+                self.subtitle_label.configure(text=f"An error occurred: {e}"); self.root.update()
 
             return None
 
     def listen_case_id(self, case_types, lang='en'):
-        # Listen for the case type
         self.subtitle_label.configure(text="Listening Case Type...")
         self.root.update()
         case_type = self.listen_case_type(case_types)
@@ -1110,7 +1132,6 @@ class HighCourt:
         else:
             return None
 
-        # Listen for the case number
         self.subtitle_label.configure(text="Listening Case Number...")
         self.root.update()
         case_number = self.listen_case_number(lang)
@@ -1121,7 +1142,6 @@ class HighCourt:
         else:
             return None
 
-        # Listen for the case year
         self.subtitle_label.configure(text="Listening Case Year...")
         self.root.update()
         case_year = self.listen_case_year(lang)
@@ -1132,16 +1152,17 @@ class HighCourt:
         else:
             return None
 
-        # Return the combined case ID
         case_id = f"{case_type}-{case_number}-{case_year}"
         print(f"Valid Case ID: {case_id}")
 
         return case_id
+    
     # ===================================================================================================
     
     # ====================================== Conversation ===============================================
-    def conversation(self, lang="en"):
+    def conversation(self, lang="pa"):
         """Engage in a conversation based on user input."""
+        self.camera_pause = True
 
         # Dictionary of case types (abbreviation: full form)
         case_types = self.case_types
@@ -1156,9 +1177,9 @@ class HighCourt:
             prompt_text = """
                 Congrates you selected english language.
                 Kindly tell me, how would you like to get the details?\n
-                1. Case Search\n
-                2. Judgment Search\n
-                3. Filing Search\n
+                1. Case Search
+                2. Judgment Search
+                3. Filing Search
             """
             lang = 'en'
             self.speak_text(prompt_text, lang=lang)
@@ -1166,9 +1187,9 @@ class HighCourt:
             prompt_text = """
                 Congrates you selected punjabi language.
                 Kindly tell me, how would you like to get the details?\n
-                1. Case Search\n
-                2. Judgment Search\n
-                3. Filing Search\n
+                1. Case Search
+                2. Judgment Search
+                3. Filing Search
             """
             lang = 'pa'
             translated_prompt = self.translate_text(prompt_text, source="en", target=lang)
@@ -1177,9 +1198,9 @@ class HighCourt:
             prompt_text = """
                 Congrates you selected hindi language.
                 Kindly tell me, how would you like to get the details?\n
-                1. Case Search\n
-                2. Judgment Search\n
-                3. Filing Search\n
+                1. Case Search
+                2. Judgment Search
+                3. Filing Search
             """
             lang = 'hi'
             translated_prompt = self.translate_text(prompt_text, source="en", target=lang)
@@ -1188,9 +1209,9 @@ class HighCourt:
             prompt_text = """
                 You did not selected any language. So by default I will continoue with punjabi language.
                 Kindly tell me, how would you like to get the details?\n
-                1. Case Search\n
-                2. Judgment Search\n
-                3. Filing Search\n
+                1. Case Search
+                2. Judgment Search
+                3. Filing Search
             """
             lang = 'pa'
             translated_prompt = self.translate_text(prompt_text, source="en", target=lang)
@@ -1219,16 +1240,15 @@ class HighCourt:
                 self.text_input.insert(0, case_id)
                 self.root.update()
 
-                # Process user input
                 self.process_case_details(case_id, lang)
         else:
             self.speak_text("No case found.")
-    # ===================================================================================================
+        
+        self.camera_pause = False
 
+    # ===================================================================================================
 
 if __name__ == "__main__":
     root = ctk.CTk()
     tts = HighCourt(root)
     root.mainloop()
-
-

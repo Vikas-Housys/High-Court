@@ -31,6 +31,8 @@ class HighCourt:
         pygame.mixer.init()
         self.load_auth_data()
 
+        self.camera_pause=False
+
         # Create main frame
         self.main_frame = ctk.CTkFrame(root, fg_color="transparent")
         self.main_frame.pack(fill="both", expand=True)
@@ -207,23 +209,6 @@ class HighCourt:
         self.last_button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.last_button_frame.pack(padx=10, pady=10)
         
-        # Stop button
-        self.stop_button = ctk.CTkButton(
-            self.last_button_frame,
-            text="Stop",
-            command=self.stop_application,
-            font=ctk.CTkFont(size=24, weight="bold"),
-            fg_color="olive",
-            text_color="white",
-            height=60,
-            width=180,
-            border_width=2,
-            border_color="black",
-            corner_radius=40
-        )
-        self.stop_button.pack(side="left", padx=10, pady=10)
-
-        
         # Close button
         self.close_button = ctk.CTkButton(
             self.last_button_frame,
@@ -327,6 +312,10 @@ class HighCourt:
         max_face_size = (240, 240)
         
         while self.is_running:
+            if self.camera_pause:
+                time.sleep(0.1)
+                continue
+
             ret, frame = self.cap.read()
             if not ret:
                 time.sleep(0.1)
@@ -429,7 +418,8 @@ class HighCourt:
             
             # Small delay to reduce CPU usage
             time.sleep(0.03)  # ~30 FPS
-    
+            
+
     def prompt_for_case_number(self):
         """Prompt the user for case number after face detection"""
         if not self.face_detected:
@@ -455,6 +445,8 @@ class HighCourt:
             self.detection_thread.join(timeout=1.0)
         if self.cap is not None:
             self.cap.release()
+        if pygame.mixer.get_init() is not None:
+            pygame.mixer.quit()
         self.root.destroy()
 
     def show_password_popup(self):
@@ -580,39 +572,16 @@ class HighCourt:
             ]
 
     def reset_application(self):
-        """Reset the application to its initial state."""
-        self.text_input.delete(0, ctk.END)
-        self.subtitle_label.configure(text="")
-        self.update_table("")
-        
-        # Stop any ongoing audio playback
-        if pygame.mixer.get_init() is not None:
-            pygame.mixer.music.stop()
-            pygame.mixer.quit()
-    
-    def stop_application(self):
         """Stop all running and pending operations, and restart the application as fresh."""
-        # Stop the camera and face detection
-        self.is_running = False
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
-        
         # Stop any ongoing audio playback
         if pygame.mixer.get_init() is not None:
             pygame.mixer.music.stop()
             pygame.mixer.quit()
         
+        # Clear the subtitle label and text input
         self.subtitle_label.configure(text="")
         self.text_input.delete(0, ctk.END)
         self.update_table("")
-        
-        # Reset the face detection flags
-        self.face_detected = False
-        self.face_detection_cooldown = False
-        
-        # Restart the camera and face detection
-        self.start_camera()
 
     def load_image(self, path, size):
         """Load and resize an image."""
@@ -623,7 +592,7 @@ class HighCourt:
         except Exception as e:
             print(f"Could not load image: {e}")
             return None
-    
+        
     # ===================================================================================================
     
     # ========================================== main keyboard ==========================================
@@ -839,20 +808,32 @@ class HighCourt:
             self.case_id_var.set("Case Number: Not Found")
 
     def process_case_details(self, case_id, lang="en"):
+        self.camera_pause=True
+        
         BASE_URL = "http://192.168.1.12:8000/cases"
 
-        def get_case_details(case_id):
-            try:
-                response = requests.get(f"{BASE_URL}/{case_id}")
-                if response.status_code == 200:
-                    return response.json()
-                else:
+        # Check if the case details are already cached
+        if hasattr(self, 'case_cache') and case_id in self.case_cache:
+            case_details = self.case_cache[case_id]
+        else:
+            def get_case_details(case_id):
+                try:
+                    response = requests.get(f"{BASE_URL}/{case_id}")
+                    if response.status_code == 200:
+                        return response.json()
+                    else:
+                        return None
+                except requests.exceptions.RequestException as e:
+                    print(f"Error fetching case details: {e}")
                     return None
-            except requests.exceptions.RequestException as e:
-                print(f"Error fetching case details: {e}")
-                return None
 
-        case_details = get_case_details(case_id)
+            case_details = get_case_details(case_id)
+            if case_details:
+                # Cache the case details
+                if not hasattr(self, 'case_cache'):
+                    self.case_cache = {}
+                self.case_cache[case_id] = case_details
+
         if case_details:
             case_details_sentence = f"""
             Your case details are as follows: Case Type - {case_details['case_type']}, Case Number - {case_details['case_no']}, and Filing Year - {case_details['case_year']}. 
@@ -866,7 +847,9 @@ class HighCourt:
             self.speak_text("Case not found.", lang)
 
         self.update_table(case_details)
-    
+
+        self.camera_pause = False
+        
     # ===================================================================================================
 
     #  ================================ language Speak and Translate ====================================
@@ -882,37 +865,52 @@ class HighCourt:
             return text
 
     def speak_text(self, text, lang="en"):
+        """
+        Convert text to speech and play it using gTTS and pygame.
+        This method has been optimized to reduce resource usage and improve performance.
+        """
         try:
             # Remove the existing file if it exists
             if os.path.exists("speech.mp3"):
                 os.remove("speech.mp3")
 
-            # Generate the speech file
+            # Generate the speech file using gTTS
             tts = gTTS(text=text, lang=lang)
             tts.save("speech.mp3")
 
-            # Initialize pygame mixer
-            pygame.mixer.init()
+            # Initialize pygame mixer if not already initialized
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+
+            # Load the speech file into pygame mixer
             pygame.mixer.music.load("speech.mp3")
-            audio = pygame.mixer.Sound("speech.mp3")
-            total_duration = audio.get_length()
-            words = text.split()
-            num_words = len(words)
-            duration_per_word = total_duration / max(num_words, 1)
 
             # Play the audio
             pygame.mixer.music.play()
 
-            # Print words in real-time and update the GUI
-            if self.root and self.subtitle_label.winfo_exists():  # Check if the widget still exists
+            # Calculate the total duration of the audio
+            audio = pygame.mixer.Sound("speech.mp3")
+            total_duration = audio.get_length()
+
+            # Split the text into words for real-time display
+            words = text.split()
+            num_words = len(words)
+            duration_per_word = total_duration / max(num_words, 1)  # Avoid division by zero
+
+            # Clear the subtitle label before starting
+            if self.root and self.subtitle_label.winfo_exists():
                 self.subtitle_label.configure(text="")
                 self.root.update()
 
+            # Start time for tracking word display
             start_time = time.time()
 
+            # Display words in real-time as the audio plays
             for word in words:
-                if self.root and self.subtitle_label.winfo_exists():  # Check if the widget still exists
-                    self.subtitle_label.configure(text=self.subtitle_label.cget("text") + " " + word)
+                if self.root and self.subtitle_label.winfo_exists():
+                    # Append the current word to the subtitle label
+                    current_text = self.subtitle_label.cget("text")
+                    self.subtitle_label.configure(text=current_text + " " + word)
                     self.root.update()
 
                 # Calculate the elapsed time and sleep accordingly
@@ -921,24 +919,23 @@ class HighCourt:
                 sleep_time = max(0, expected_time - elapsed_time)
                 time.sleep(sleep_time)
 
-            # Clear the subtitle after the audio finishes
-            if self.root and self.subtitle_label.winfo_exists():  # Check if the widget still exists
-                self.root.update()
-
             # Wait for the audio to finish playing
             while pygame.mixer.music.get_busy():
-                pygame.time.Clock().tick(10)
+                pygame.time.Clock().tick(10)  # Limit the loop to 10 FPS to reduce CPU usage
 
-            # Clean up
+            # Clean up pygame mixer
             pygame.mixer.quit()
+
         except Exception as e:
             print(f"Text-to-speech error: {e}")
-        
-        finally:
-            # Clear the subtitle after the audio finishes
-            if self.root or self.subtitle_label.winfo_exists():  # Check if the widget still exists
-                self.root.update()
 
+        finally:
+            # Clear the subtitle label after the audio finishes
+            if self.root and self.subtitle_label.winfo_exists():
+                self.subtitle_label.configure(text="")
+                self.root.update()
+        
+    
     def listen(self, lang="en"):
         """Listen for user input and return the recognized text."""
         recognizer = sr.Recognizer()
@@ -950,7 +947,8 @@ class HighCourt:
                 self.subtitle_label.configure(text="Listening...")
                 self.root.update()
 
-                audio = recognizer.listen(source, timeout=8)
+                # Reduce listening time to 5 seconds
+                audio = recognizer.listen(source, timeout=5)
                 recognized_text = recognizer.recognize_google(audio, language=lang)
                 winsound.PlaySound(self.end_sound, winsound.SND_FILENAME)
                 return recognized_text
@@ -1164,6 +1162,7 @@ class HighCourt:
     # ====================================== Conversation ===============================================
     def conversation(self, lang="en"):
         """Engage in a conversation based on user input."""
+        self.camera_pause = True
 
         # Dictionary of case types (abbreviation: full form)
         case_types = self.case_types
@@ -1244,12 +1243,12 @@ class HighCourt:
                 self.process_case_details(case_id, lang)
         else:
             self.speak_text("No case found.")
-    
+        
+        self.camera_pause = False
+
     # ===================================================================================================
 
 if __name__ == "__main__":
     root = ctk.CTk()
     tts = HighCourt(root)
     root.mainloop()
-
-
