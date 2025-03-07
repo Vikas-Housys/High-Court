@@ -1,284 +1,213 @@
-import tkinter as tk
-import asyncio
-import os
-import cv2
-import json
-import time
-import psutil
-import winsound
-import subprocess
 import speech_recognition as sr
-from PIL import Image, ImageTk
+import customtkinter as ctk
+from tkinter import messagebox
+import os
+import time
+import pygame
 from gtts import gTTS
-from mutagen.mp3 import MP3
 from deep_translator import GoogleTranslator
 
-class Conversation:
-    def __init__(self):
+class VoiceAssistant:
+    def __init__(self, root):
+        self.root = root
         self._translators = {}
-        self.recognizer = sr.Recognizer()
-        self.recognizer.dynamic_energy_threshold = True
+        self.subtitle_label = ctk.CTkLabel(root, text="")
+        self.text_input = ctk.CTkEntry(root)
         
-        self.start_sound = "C:\\Windows\\Media\\chimes.wav"
-        self.end_sound = "C:\\Windows\\Media\\notify.wav"
-
-    def get_audio_length(self, file_path="speech.mp3"):
-        try:
-            audio = MP3(file_path)
-            return audio.info.length
-        except Exception as e:
-            print(f"Audio length error: {e}")
-            return 3  # Default to 3 seconds if error occurs
-
-    async def speak_text(self, text, lang="en"):
-        try:
-            tts = gTTS(text=text, lang=lang)
-            tts.save("speech.mp3")
-            subprocess.Popen(["start", "speech.mp3"], shell=True)
-            await asyncio.sleep(self.get_audio_length("speech.mp3"))
-            os.remove("speech.mp3")
-        except Exception as e:
-            print(f"Text-to-speech error: {e}")
-
-    async def recognize_speech(self, language="en-US", timeout=10):
-        try:
-            with sr.Microphone() as source:
-                print("Listening...")
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                winsound.PlaySound(self.start_sound, winsound.SND_FILENAME)
-                
-                audio = self.recognizer.listen(source, timeout=timeout, phrase_time_limit=timeout)
-                text = self.recognizer.recognize_google(audio, language=language)
-                
-                print(f"Recognized: {text}")
-                return text
-        except sr.WaitTimeoutError:
-            print("No speech detected within timeout.")
-            return None
-        except sr.UnknownValueError:
-            print("Could not understand audio")
-            return None
-        except Exception as e:
-            print(f"Speech recognition error: {e}")
-            return None
+        # Mapping for Hindi & Punjabi numerals to English digits
+        self.hindi_punjabi_digit_map = {
+            '०': '0', '१': '1', '२': '2', '३': '3', '४': '4', 
+            '५': '5', '६': '6', '७': '7', '८': '8', '९': '9',
+            '੦': '0', '੧': '1', '੨': '2', '੩': '3', '੪': '4', 
+            '੫': '5', '੬': '6', '੭': '7', '੮': '8', '੯': '9'
+        }
 
     def translate_text(self, text, source, target):
+        """Translate text from source language to target language."""
         key = (source, target)
         if key not in self._translators:
             self._translators[key] = GoogleTranslator(source=source, target=target)
-        
         try:
             return self._translators[key].translate(text)
         except Exception as e:
             print(f"Translation error: {e}")
             return text
 
-class CourtApplication:
-    def __init__(self, root):
-        self.root = root
-        self.cap = None
-        with open('case_db.json', 'r', encoding='utf-8') as f:
-            self.case_db = json.load(f)
+    def speak_text(self, text, lang="pa"):
+        """Convert text to speech and play it."""
+        try:
+            if os.path.exists("speech.mp3"):
+                os.remove("speech.mp3")
+
+            tts = gTTS(text=text, lang=lang)
+            tts.save("speech.mp3")
+
+            pygame.mixer.init()
+            pygame.mixer.music.load("speech.mp3")
+            audio = pygame.mixer.Sound("speech.mp3")
+            total_duration = audio.get_length()
+            words = text.split()
+            num_words = len(words)
+            duration_per_word = total_duration / max(num_words, 1)
+
+            pygame.mixer.music.play()
+            self.subtitle_label.configure(text="")
+            start_time = time.time()
+
+            for word in words:
+                self.subtitle_label.configure(text=self.subtitle_label.cget("text") + " " + word)
+                self.root.update()
+
+                elapsed_time = time.time() - start_time
+                expected_time = duration_per_word * (words.index(word) + 1)
+                sleep_time = max(0, expected_time - elapsed_time)
+                time.sleep(sleep_time)
+
+            while pygame.mixer.music.get_busy():
+                pygame.time.Clock().tick(10)
+
+            pygame.mixer.quit()
+        except Exception as e:
+            print(f"Text-to-speech error: {e}")
+            messagebox.showerror("TTS Error", f"Could not speak the text: {e}")
+
+    def convert_to_english_digits(self, text):
+        """Convert Hindi & Punjabi numerals to standard English digits."""
+        return ''.join(self.hindi_punjabi_digit_map.get(char, char) for char in text)
+
+    def listen(self):
+        """Listen for user input and try different languages if needed."""
+        recognizer = sr.Recognizer()
         
-        self.conversation = Conversation()
-        self.case_number_entry = None
-        self.text_area = None
-        self.is_full_screen = False
+        # List of languages to try in order of preference
+        languages = ["pa-IN", "hi-IN", "en-IN", "en-US"]
         
-    def toggle_full_screen(self, event=None):
-        self.is_full_screen = not self.is_full_screen
-        self.root.attributes('-fullscreen', self.is_full_screen)
-        if not self.is_full_screen:
-            self.root.state('normal')
+        with sr.Microphone() as source:
+            try:
+                recognizer.adjust_for_ambient_noise(source)
+                self.subtitle_label.configure(text="Listening...")
+                self.root.update()
+                
+                audio = recognizer.listen(source, timeout=5)
+                
+                # Try each language until one works
+                recognized_text = None
+                for lang in languages:
+                    try:
+                        text = recognizer.recognize_google(audio, language=lang)
+                        print(f"Recognized with {lang}: {text}")
+                        recognized_text = text
+                        break
+                    except sr.UnknownValueError:
+                        continue
+                    except Exception as e:
+                        print(f"Error with {lang}: {e}")
+                        continue
+                
+                if recognized_text is None:
+                    messagebox.showerror("Error", "Could not understand audio in any language.")
+                    return ""
+                
+                # Convert any Hindi/Punjabi numerals to English
+                converted_text = self.convert_to_english_digits(recognized_text)
+                print(f"Converted text: {converted_text}")
+                
+                return converted_text
+                
+            except sr.UnknownValueError:
+                messagebox.showerror("Error", "Could not understand audio.")
+            except sr.RequestError as e:
+                messagebox.showerror("Error", f"Could not request results; {e}")
+            except Exception as e:
+                messagebox.showerror("Error", f"An error occurred: {e}")
+                
+        return ""
 
-    def center_window(self, width, height):
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        position_top = int(screen_height / 2 - height / 2)
-        position_left = int(screen_width / 2 - width / 2)
-        self.root.geometry(f'{width}x{height}+{position_left}+{position_top}')
+    def process_case_number(self, case_number, lang="en"):
+        """Process the case number from user input."""
+        # Placeholder for your case processing logic
+        response = f"Processing case number: {case_number}"
+        translated_response = self.translate_text(response, source="en", target=lang)
+        self.speak_text(translated_response, lang=lang)
 
-    def get_case_description(self, case_number):
-        return next((case['case'] for case in self.case_db if case['case number'] == case_number), None)
+    def conversation(self, lang="pa"):
+        """Engage in a conversation based on user input."""
+        prompt_text = """
+            Kindly tell me, how would you like to get the details?
+            1. Case Search
+            2. Judgment Search
+            3. Filing Search
+        """
 
-    def update_text_area(self, message):
-        self.text_area.delete(1.0, tk.END)
-        self.text_area.insert(tk.END, message)
+        # Translate prompt if needed
+        translated_prompt = self.translate_text(prompt_text, source="en", target=lang)
+        self.speak_text(translated_prompt, lang=lang)
 
-    async def cleanup_resources(self):
-        if self.cap:
-            self.cap.release()
-        
-        [proc.terminate() for proc in psutil.process_iter(['name']) 
-         if proc.info['name'] in ['speech.mp3', 'python.exe']]
-        
-        cv2.destroyAllWindows()
-        self.text_area.delete(1.0, tk.END)
-        self.case_number_entry.delete(0, tk.END)
-
-    async def on_button_click(self, language):
-        case_number = self.case_number_entry.get()
-        if not case_number.isdigit():
-            self.update_text_area("Please enter a valid case number.\n")
+        # Listen for user input
+        user_response = self.listen()
+        if not user_response:
             return
-        
-        case_description = self.get_case_description(case_number)
-        if case_description:
-            message = f"Case number {case_number}: {case_description}"
-            translated_message = self.conversation.translate_text(message, 'en', language)
-            self.update_text_area(translated_message)
-            await self.conversation.speak_text(translated_message, language)
-        else:
-            self.update_text_area(f"No case found for case number {case_number}.\n")
-            await self.conversation.speak_text(f"No case found for case number {case_number}.", language)
-
-    def manual_voice_input(self):
-        asyncio.run(self.manual_voice_input_async())
-    
-    async def manual_voice_input_async(self):
-        try:
-            case_number = await self.conversation.recognize_speech(language="en-US", timeout=10)
             
-            if case_number and case_number.isdigit():
-                self.case_number_entry.delete(0, tk.END)
-                self.case_number_entry.insert(tk.END, case_number)
-                await self.on_button_click('pa')  # Default to Punjabi
-            else:
-                self.update_text_area("Invalid input. Please say a valid case number.")
-                await self.conversation.speak_text("Please say a valid case number.", lang="en")
+        # Display the recognized response
+        self.text_input.delete(0, ctk.END)
+        self.text_input.insert(0, user_response)
+        self.root.update()
         
-        except Exception as e:
-            print(f"Manual voice input error: {e}")
-            self.update_text_area("Error in voice input.")
+        # Extract any digits from the response
+        digits_only = ''.join(filter(str.isdigit, user_response))
 
-    def create_gui(self):
-        # Set up root window
-        self.root.title("Case Search Application")
-        self.root.configure(bg="#E6E6FA")  # Light lavender background
+        if digits_only:
+            if digits_only == "1":
+                self.handle_case_search(lang)
+            elif digits_only == "2":
+                self.handle_judgment_search(lang)
+            elif digits_only == "3":
+                self.handle_filing_search(lang)
+            else:
+                response = "I didn't understand your choice. Please try again."
+                translated_response = self.translate_text(response, source="en", target=lang)
+                self.speak_text(translated_response, lang=lang)
+        else:
+            # Try to identify the option from text
+            response_lower = user_response.lower()
+            if "case" in response_lower or "one" in response_lower or "1" in response_lower:
+                self.handle_case_search(lang)
+            elif "judgment" in response_lower or "two" in response_lower or "2" in response_lower:
+                self.handle_judgment_search(lang)
+            elif "filing" in response_lower or "three" in response_lower or "3" in response_lower:
+                self.handle_filing_search(lang)
+            else:
+                response = "I couldn't understand your choice. Please try again."
+                translated_response = self.translate_text(response, source="en", target=lang)
+                self.speak_text(translated_response, lang=lang)
 
-        # Create main container with 3D effect
-        main_container = tk.Frame(
-            self.root, 
-            bd=10, 
-            relief="raised", 
-            bg="#FFFFFF", 
-            highlightthickness=2, 
-            highlightbackground="#C0C0C0"
-        )
+    def handle_case_search(self, lang):
+        """Handle the case search option."""
+        prompt = "Please say the case number."
+        translated_prompt = self.translate_text(prompt, source="en", target=lang)
+        self.speak_text(translated_prompt, lang=lang)
+        
+        case_number = self.listen()
+        if case_number:
+            # Convert any Hindi/Punjabi digits
+            case_number = self.convert_to_english_digits(case_number)
+            # Extract digits
+            digits_only = ''.join(filter(str.isdigit, case_number))
+            if digits_only:
+                self.process_case_number(digits_only, lang)
+            else:
+                response = "No valid case number found. Please try again."
+                translated_response = self.translate_text(response, source="en", target=lang)
+                self.speak_text(translated_response, lang=lang)
 
-        # Center the container
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        container_width = 800
-        container_height = 600
-        x_position = (screen_width - container_width) // 2
-        y_position = (screen_height - container_height) // 2
+    def handle_judgment_search(self, lang):
+        """Handle the judgment search option."""
+        response = "Judgment search selected. This feature is coming soon."
+        translated_response = self.translate_text(response, source="en", target=lang)
+        self.speak_text(translated_response, lang=lang)
 
-        main_container.place(x=x_position, y=y_position, width=container_width, height=container_height)
-
-        # Header
-        header_label = tk.Label(
-            main_container, 
-            text="Case Search Portal", 
-            font=("Arial", 20, "bold"), 
-            bg="#FFFFFF", 
-            fg="#4A4A4A",
-            relief="groove",
-            bd=2
-        )
-        header_label.pack(pady=10, fill=tk.X, padx=20)
-
-        # Image Section
-        try:
-            phone_court_image = Image.open("images/court01.jpg")
-            phone_court_image = phone_court_image.resize((480, 240), Image.Resampling.LANCZOS)
-            phone_court_img_tk = ImageTk.PhotoImage(phone_court_image)
-
-            img_label = tk.Label(
-                main_container, 
-                image=phone_court_img_tk, 
-                bg="#FFFFFF", 
-                relief="sunken", 
-                bd=2
-            )
-            img_label.image = phone_court_img_tk
-            img_label.pack(pady=10)
-        except Exception as e:
-            print(f"Error loading image: {e}")
-
-        # Case Number Entry Frame
-        entry_frame = tk.Frame(main_container, bg="#FFFFFF")
-        entry_frame.pack(pady=10)
-
-        # Case Number Entry
-        self.case_number_entry = tk.Entry(
-            entry_frame, 
-            width=40, 
-            font=("Arial", 14), 
-            bd=2, 
-            relief="ridge"
-        )
-        self.case_number_entry.pack(side=tk.LEFT, padx=(0, 10))
-
-        # Mic Button
-        mic_button = tk.Button(
-            entry_frame, 
-            text="🎤", 
-            font=("Arial", 14), 
-            bg="#F0F0F0", 
-            relief="raised",
-            bd=2, 
-            command=self.manual_voice_input  # Use the normal function (no async needed here)
-        )
-        mic_button.pack(side=tk.LEFT)
-
-        # Language Buttons Frame
-        button_frame = tk.Frame(main_container, bg="#FFFFFF")
-        button_frame.pack(pady=10)
-
-        languages = [('Hindi', 'hi'), ('English', 'en'), ('Punjabi', 'pa')]
-        for text, lang in languages:
-            btn = tk.Button(
-                button_frame, 
-                text=text, 
-                font=("Arial", 12), 
-                bg="#4169E1", 
-                fg="white", 
-                relief="raised",
-                bd=3,
-                command=lambda lang=lang: asyncio.run(self.on_button_click(lang))  # Use lambda to pass argument
-            )
-            btn.pack(side=tk.LEFT, padx=5)
-
-        # Text Area
-        self.text_area = tk.Text(
-            main_container, 
-            width=50, 
-            height=8, 
-            font=("Arial", 12),
-            bd=2,
-            relief="sunken"
-        )
-        self.text_area.pack(pady=10)
-
-        # Close Button
-        close_button = tk.Button(
-            main_container, 
-            text="Close", 
-            font=("Arial", 12, "bold"), 
-            bg="#DC143C", 
-            fg="white", 
-            relief="raised",
-            bd=3,
-            command=self.root.quit  # Use quit for closing the application
-        )
-        close_button.pack(pady=10)
-
-def main():
-    root = tk.Tk()
-    app = CourtApplication(root)
-    app.create_gui()
-    root.mainloop()
-
-if __name__ == "__main__":
-    main()
+    def handle_filing_search(self, lang):
+        """Handle the filing search option."""
+        response = "Filing search selected. This feature is coming soon."
+        translated_response = self.translate_text(response, source="en", target=lang)
+        self.speak_text(translated_response, lang=lang)

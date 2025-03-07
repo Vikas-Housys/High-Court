@@ -1,23 +1,23 @@
 import tkinter as tk
 import asyncio
+from gtts import gTTS
 import os
 import cv2
-import json
-import time
-import psutil
-import winsound
-import subprocess  # Add this import
-import speech_recognition as sr
 from PIL import Image, ImageTk
-from gtts import gTTS
+import json
+import subprocess
+import psutil
 from mutagen.mp3 import MP3
 from deep_translator import GoogleTranslator
+import speech_recognition as sr
+import winsound
+import time
 
+# ===================================================================================================================
 class Conversation:
     def __init__(self):
-        self._translators = {}
+        self.translator = GoogleTranslator()
         self.recognizer = sr.Recognizer()
-        self.recognizer.dynamic_energy_threshold = True
         
         self.start_sound = "C:\\Windows\\Media\\chimes.wav"
         self.end_sound = "C:\\Windows\\Media\\notify.wav"
@@ -27,18 +27,25 @@ class Conversation:
             audio = MP3(file_path)
             return audio.info.length
         except Exception as e:
-            print(f"Audio length error: {e}")
-            return 3  # Default to 3 seconds if error occurs
+            print(f"Error in get_audio_length: {e}")
+            return 0
 
     async def speak_text(self, text, lang="en"):
         try:
             tts = gTTS(text=text, lang=lang)
             tts.save("speech.mp3")
-            subprocess.Popen(["start", "speech.mp3"], shell=True)
-            await asyncio.sleep(self.get_audio_length("speech.mp3"))
+            subprocess.run(["start", "speech.mp3"], shell=True)
+            time_to_wait = self.get_audio_length("speech.mp3")
+            await asyncio.sleep(time_to_wait)
             os.remove("speech.mp3")
         except Exception as e:
-            print(f"Text-to-speech error: {e}")
+            print(f"Error in speak_text: {e}")
+
+    def translate_text(self, text, source, target):
+        try:
+            return GoogleTranslator(source=source, target=target).translate(text)
+        except Exception as e:
+            return f"Error in translation: {e}"
 
     async def recognize_speech(self, language="en-US", timeout=10):
         try:
@@ -47,57 +54,64 @@ class Conversation:
                 self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
                 winsound.PlaySound(self.start_sound, winsound.SND_FILENAME)
                 
-                audio = self.recognizer.listen(source, timeout=timeout, phrase_time_limit=timeout)
-                text = self.recognizer.recognize_google(audio, language=language)
+                speech_future = asyncio.Future()
+                def recognize_callback():
+                    try:
+                        audio = self.recognizer.listen(source, timeout=timeout)
+                        text = self.recognizer.recognize_google(audio, language=language)
+                        speech_future.set_result(text)
+                    except Exception as e:
+                        speech_future.set_exception(e)
                 
-                print(f"Recognized: {text}")
-                return text
-        except sr.WaitTimeoutError:
-            print("No speech detected within timeout.")
-            return None
-        except sr.UnknownValueError:
-            print("Could not understand audio")
-            return None
+                loop = asyncio.get_event_loop()
+                loop.run_in_executor(None, recognize_callback)
+                
+                try:
+                    text = await asyncio.wait_for(speech_future, timeout=timeout)
+                    print(f"Recognized: {text}")
+                    return text
+                except asyncio.TimeoutError:
+                    await self.speak_text("No input detected.", lang="en")
+                    return None
         except Exception as e:
-            print(f"Speech recognition error: {e}")
+            print(f"Error in recognize_speech: {e}")
             return None
 
-    def translate_text(self, text, source, target):
-        key = (source, target)
-        if key not in self._translators:
-            self._translators[key] = GoogleTranslator(source=source, target=target)
-        
-        try:
-            return self._translators[key].translate(text)
-        except Exception as e:
-            print(f"Translation error: {e}")
-            return text
-    
+#==========================================================================================================
 class CourtApplication:
     def __init__(self, root):
         self.root = root
         self.cap = None
-        with open('case_db.json', 'r', encoding='utf-8') as f:
+        with open('case_db.json', 'r') as f: 
             self.case_db = json.load(f)
-        
         self.conversation = Conversation()
         self.case_number_entry = None
         self.text_area = None
         self.video_label = None
-        self.is_full_screen = False
-        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+        # Bind the Escape key to toggle full screen
+        self.root.bind("<Escape>", self.toggle_full_screen)
+        self.is_full_screen = False  # Start in windowed mode
 
     def toggle_full_screen(self, event=None):
-        self.is_full_screen = not self.is_full_screen
-        self.root.attributes('-fullscreen', self.is_full_screen)
-        if not self.is_full_screen:
-            self.root.state('normal')
+        """Toggle between full screen and windowed mode."""
+        if self.is_full_screen:
+            self.root.attributes('-fullscreen', False)
+            self.root.state('normal')  # Restore window to normal state
+        else:
+            self.root.attributes('-fullscreen', True)  # Make window full screen
+        self.is_full_screen = not self.is_full_screen  # Flip the full screen state
 
     def center_window(self, width, height):
+        """Centers the window on the screen."""
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
+
+        # Calculate the position of the window to center it
         position_top = int(screen_height / 2 - height / 2)
         position_left = int(screen_width / 2 - width / 2)
+
+        # Set the position of the window
         self.root.geometry(f'{width}x{height}+{position_left}+{position_top}')
 
     def get_case_description(self, case_number):
@@ -108,13 +122,21 @@ class CourtApplication:
         self.text_area.insert(tk.END, message)
 
     def cleanup_resources(self):
-        if self.cap:
+        # Close camera
+        if self.cap is not None:
             self.cap.release()
-        
-        [proc.terminate() for proc in psutil.process_iter(['name']) 
-         if proc.info['name'] in ['speech.mp3', 'python.exe']]
-        
         cv2.destroyAllWindows()
+
+        # Kill any hanging mp3 processes
+        for proc in psutil.process_iter(['name']):
+            if proc.info['name'] == 'speech.mp3':
+                proc.terminate()
+
+        # Remove temporary files
+        if os.path.exists('speech.mp3'):
+            os.remove('speech.mp3')
+
+        # Ensure Tkinter window is closed
         self.root.quit()
         self.root.destroy()
 
@@ -127,6 +149,7 @@ class CourtApplication:
         case_description = self.get_case_description(case_number)
         if case_description:
             message = f"Case number {case_number}: {case_description}"
+            # First update GUI with translated message
             translated_message = self.conversation.translate_text(message, 'en', {'hindi': 'hi', 'punjabi': 'pa'}.get(language, 'en'))
             self.update_text_area(translated_message)
             await self.conversation.speak_text(translated_message, {'hindi': 'hi', 'punjabi': 'pa'}.get(language, 'en'))
@@ -149,6 +172,7 @@ class CourtApplication:
                     self.update_text_area("Invalid input. Please try again.\n")
                     await self.conversation.speak_text("Please say a valid case number.", lang="en")
             
+            # Check for timeout
             if time.time() - start_time > 30:
                 self.update_text_area("No input detected. Restarting application.\n")
                 await self.conversation.speak_text("No input detected. Restarting application.", lang="en")
@@ -157,6 +181,7 @@ class CourtApplication:
 
     async def detect_face_and_ask_case_number(self):
         try:
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
             self.cap = cv2.VideoCapture(0)
             
             while True:
@@ -167,8 +192,8 @@ class CourtApplication:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 roi = gray[int(frame.shape[0] * 0.25):int(frame.shape[0] * 0.75), 
                            int(frame.shape[1] * 0.25):int(frame.shape[1] * 0.75)]
-                faces = self.face_cascade.detectMultiScale(roi, scaleFactor=1.05, minNeighbors=3, 
-                                                      minSize=(100, 100), maxSize=(300, 300))
+                faces = face_cascade.detectMultiScale(roi, scaleFactor=1.1, minNeighbors=5, 
+                                                      minSize=(150, 150), maxSize=(300, 300))
                 
                 if len(faces) > 0:
                     for (x, y, w, h) in faces:
@@ -177,8 +202,10 @@ class CourtApplication:
                                       (x + w + int(frame.shape[1] * 0.25), y + h + int(frame.shape[0] * 0.25)), 
                                       (0, 255, 0), 2)
                     
+                    # First update GUI
                     self.update_text_area("Face detected! Please say your case number.")
                     
+                    # Then speak
                     await self.conversation.speak_text(
                         self.conversation.translate_text("Face detected! Please say your case number.", 'en', 'pa'), 
                         'pa'
@@ -186,6 +213,7 @@ class CourtApplication:
                     await self.listen_for_case_number()
                     break
                 
+                # Update video display
                 self.video_label.img_tk = ImageTk.PhotoImage(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
                 self.video_label.config(image=self.video_label.img_tk)
                 self.root.update()
@@ -193,75 +221,99 @@ class CourtApplication:
         except Exception as e:
             print(f"Face detection error: {e}")
             self.cleanup_resources()
+        
     
     def create_gui(self):
         self.root.title("Case Search Application")
-        self.root.option_add('*Font', ('Arial', 10))
 
-        outer_frame = tk.Frame(self.root, bd=5, relief="solid", bg="brown")
-        outer_frame.pack(padx=20, pady=20, expand=True, fill=tk.BOTH)
+        # Create an outer frame with silver solid border
+        outer_frame = tk.Frame(self.root, bd=5, relief="solid", bg="brown", highlightbackground="silver", highlightthickness=2)
+        outer_frame.pack(padx=20, pady=20, expand=True, fill=tk.BOTH)  # Fill the window and add padding
 
-        self.center_window(800, 600)
+        # Center the window
+        self.center_window(800, 600)  # You can adjust the width and height here
 
+        # Set background color to light sky blue (RGB equivalent of #87CEEB)
         outer_frame.configure(bg="#87CEEB")
 
+        # Load and display the image (phone court.jpg) above the "Enter case number" field
         try:
             phone_court_image = Image.open("images/court01.jpg")
             phone_court_image = phone_court_image.resize((480, 240), Image.Resampling.LANCZOS)
             phone_court_img_tk = ImageTk.PhotoImage(phone_court_image)
 
+            # Create a label to display the image
             img_label = tk.Label(outer_frame, image=phone_court_img_tk, bg="#87CEEB")
-            img_label.image = phone_court_img_tk
-            img_label.grid(row=0, column=0, columnspan=3, pady=10)
+            img_label.image = phone_court_img_tk  # Keep reference to avoid garbage collection
+            img_label.grid(row=0, column=0, columnspan=3, pady=10)  # Positioning with grid
 
         except Exception as e:
             print(f"Error loading image: {e}")
 
+        # Header Label
         header_label = tk.Label(outer_frame, text="Case Search", font=("Arial", 18, "bold"), pady=10, bg="#87CEEB")
         header_label.grid(row=1, column=0, columnspan=3)
 
+        # Instructions Label
         instructions_label = tk.Label(outer_frame, text="Please say your case number after face detection.", font=("Arial", 12, "bold"), wraplength=400, bg="#87CEEB")
         instructions_label.grid(row=2, column=0, columnspan=3, pady=5)
 
-        self.case_number_entry = tk.Entry(outer_frame, width=40, font=("Arial", 14, "bold"), bd=2, relief="solid")
+        # Case Number Entry with rounded corners and yellow border
+        self.case_number_entry = tk.Entry(outer_frame, width=40, font=("Arial", 14, "bold"), bd=2, relief="solid", highlightthickness=2, highlightbackground="yellow", highlightcolor="yellow")
         self.case_number_entry.grid(row=3, column=0, columnspan=3, pady=10)
 
+        # Language selection buttons (using grid for better alignment)
         button_frame = tk.Frame(outer_frame, bg="#87CEEB")
         button_frame.grid(row=4, column=0, columnspan=3, pady=10)
 
+        # Custom Style for Rounded Buttons with yellow border
         def create_rounded_button(text, language):
-            button = tk.Button(button_frame, text=text, font=("Arial", 12, "bold"), bg="blue", fg="white", 
+            button = tk.Button(button_frame, text=text, font=("Arial", 12, "bold"), bg="blue", fg="white", activebackground="lightgreen", 
                             command=lambda lang=language: asyncio.run(self.on_button_click(lang)),
                             relief="flat", padx=10, pady=10)
-            button.config(borderwidth=2, highlightbackground="darkblue", highlightthickness=2)
+            # Customizing to make the button's corners rounded with yellow border
+            button.config(borderwidth=2, highlightbackground="darkblue", highlightthickness=2, highlightcolor="lightblue")
             button.grid(row=0, column=languages.index((language, text)), padx=15, pady=5)
 
         languages = [('hindi', 'Hindi'), ('english', 'English'), ('punjabi', 'Punjabi')]
         for language, text in languages:
             create_rounded_button(text, language)
 
-        self.text_area = tk.Text(outer_frame, width=50, height=8, wrap=tk.WORD, font=("Arial", 12), bd=2, relief="solid")
+        # Text Area with rounded corners and yellow border
+        self.text_area = tk.Text(outer_frame, width=50, height=8, wrap=tk.WORD, font=("Arial", 12), bd=2, relief="solid", highlightthickness=2, highlightbackground="yellow", highlightcolor="yellow")
         self.text_area.grid(row=5, column=0, columnspan=3, pady=10)
 
+        # Video Label for displaying the camera feed
         self.video_label = tk.Label(outer_frame)
         self.video_label.grid(row=6, column=0, columnspan=3, pady=10)
 
+        # Close Button with rounded corners and yellow border
         close_button = tk.Button(outer_frame, text="Close", font=("Arial", 12, "bold"), command=self.cleanup_resources, bg="red", fg="white", relief="flat", padx=20, pady=10)
-        close_button.config(borderwidth=2, highlightbackground="green", highlightthickness=2)
+        close_button.config(borderwidth=2, highlightbackground="green", highlightthickness=2, highlightcolor="yellow")
         close_button.grid(row=7, column=0, columnspan=3, padx=15, pady=10)
 
-        self.root.bind("<Escape>", self.toggle_full_screen)
+        # Add a loading spinner label (Initially hidden)
+        self.loading_label = tk.Label(outer_frame, text="Processing... Please wait.", font=("Arial", 12), fg="red", bg="#87CEEB")
+        self.loading_label.grid(row=8, column=0, columnspan=3, pady=10)
+        self.loading_label.grid_forget()  # Hide it initially
 
+        # Run the face detection method to start the process
         asyncio.get_event_loop().run_until_complete(self.detect_face_and_ask_case_number())
 
 
 def main():
-    root = tk.Tk()
-    app = CourtApplication(root)
-    app.create_gui()
-    root.mainloop()
+    while True:
+        try:
+            root = tk.Tk()
+            app = CourtApplication(root)
+            app.create_gui()
+            root.mainloop()
+        except Exception as e:
+            print(f"Application error: {e}")
+            break
 
 if __name__ == "__main__":
     main()
+
 
 
