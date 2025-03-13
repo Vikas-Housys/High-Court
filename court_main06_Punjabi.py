@@ -29,9 +29,21 @@ class HighCourt:
         ctk.set_default_color_theme("blue")
 
         pygame.mixer.init()
+
+        # Initialize the reset_timer before any other method calls
+        self.reset_timer = None
+
+        # Load authentication data
         self.load_auth_data()
 
-        self.camera_pause=False
+        # Reset flags after inactivity
+        self.reset_flags_after_inactivity()
+
+        # Flags
+        self.camera_pause = False
+        self.speak_pause = False
+        self.conversation_pause = False
+        self.listen_pause = False
 
         # Create main frame
         self.main_frame = ctk.CTkFrame(root, fg_color="transparent")
@@ -107,7 +119,7 @@ class HighCourt:
         self.mic_image = self.load_image("images/mic2.png", (50, 50))
         self.mic_button = ctk.CTkButton(
             self.input_frame,
-            command=self.conversation,
+            command=self.mic_conversation,
             fg_color="transparent",
             height=50,
             width=100,
@@ -130,7 +142,7 @@ class HighCourt:
         self.english_button = ctk.CTkButton(
             self.button_frame,
             text="Speak English",
-            command=lambda: self.process_case_details(self.text_input.get(), "en"),
+            command=lambda: self.process_case_details(self.text_input.get(), lang="en"),
             font=ctk.CTkFont(size=24, weight="bold"),
             fg_color="#573AC0",
             text_color="white",
@@ -145,7 +157,7 @@ class HighCourt:
         self.hindi_button = ctk.CTkButton(
             self.button_frame,
             text="हिंदी बोलें",
-            command=lambda: self.process_case_details(self.translate_text(self.text_input.get(), source='en', target='hi'), "hi"),
+            command=lambda: self.process_case_details(self.text_input.get(), lang="hi"),
             font=ctk.CTkFont(size=24, weight="bold"),
             fg_color="#573AC0",
             text_color="white",
@@ -160,7 +172,7 @@ class HighCourt:
         self.punjabi_button = ctk.CTkButton(
             self.button_frame,
             text="ਹਿੰਦੀ ਬੋਲੋ",
-            command=lambda: self.process_case_details(self.translate_text(self.text_input.get(), source='en', target='pa'), "pa"),
+            command=lambda: self.process_case_details(self.text_input.get(), lang="pa"),
             font=ctk.CTkFont(size=24, weight="bold"),
             fg_color="#573AC0",
             text_color="white",
@@ -208,6 +220,22 @@ class HighCourt:
         # Buttons for speaking in different languages
         self.last_button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.last_button_frame.pack(padx=10, pady=10)
+
+        # Stop button
+        self.stop_button = ctk.CTkButton(
+            self.last_button_frame,
+            text="Stop",
+            command=self.stop_application,
+            font=ctk.CTkFont(size=24, weight="bold"),
+            fg_color="olive",
+            text_color="white",
+            height=60,
+            width=180,
+            border_width=2,
+            border_color="black",
+            corner_radius=40
+        )
+        self.stop_button.pack(side="left", padx=10, pady=10)
         
         # Close button
         self.close_button = ctk.CTkButton(
@@ -293,9 +321,34 @@ class HighCourt:
     
     # ===================================================================================================
 
+    # ========================================= Reset Application =======================================
+    def reset_flags_after_inactivity(self):
+        """Reset all flags after 30 seconds of inactivity."""
+        if self.reset_timer is not None:
+            self.reset_timer.cancel()  # Cancel the existing timer if it's running
+        
+        # Start a new timer for 30 seconds
+        self.reset_timer = threading.Timer(30.0, self.reset_flags)
+        self.reset_timer.start()
+
+    def reset_flags(self):
+        """Reset all flags to False."""
+        self.camera_pause = False
+        self.speak_pause = False
+        self.conversation_pause = False
+        self.listen_pause = False
+        self.face_detection_cooldown = False
+        print("Flags reset due to inactivity.")
+    
+    def on_action_performed(self):
+        """Call this method whenever an action is performed."""
+        self.reset_flags_after_inactivity()
+    # ===================================================================================================
+
     # ========================================= face detection ==========================================
     def start_camera(self):
         """Start the camera and face detection thread"""
+        self.on_action_performed()
         self.cap = cv2.VideoCapture(0)  # 0 is usually the built-in webcam
         self.is_running = True
         
@@ -306,6 +359,7 @@ class HighCourt:
     
     def detect_faces(self):
         """Thread function for face detection with minimum and maximum range control"""
+        self.on_action_performed()
         last_detection_time = 0
         cooldown_period = 10  # 10 seconds cooldown
         min_face_size = (160, 160) 
@@ -407,7 +461,7 @@ class HighCourt:
                 last_detection_time = current_time
                 self.face_detection_cooldown = True
                 
-                self.root.after(0, self.prompt_for_case_number)
+                self.root.after(0, self.face_conversation)
             
             # Convert the image to PIL format for CTkLabel
             pil_img = Image.fromarray(frame_rgb)
@@ -418,29 +472,15 @@ class HighCourt:
             
             # Small delay to reduce CPU usage
             time.sleep(0.03)  # ~30 FPS
-            
 
-    def prompt_for_case_number(self):
-        """Prompt the user for case number after face detection"""
-        if not self.face_detected:
-            return
-            
-        self.face_detected = False
-        self.conversation(lang='pa')
-        
-        # Reset cooldown after some time
-        def reset_cooldown():
-            self.face_detection_cooldown = False
-            
-        # Schedule cooldown reset after 10 seconds
-        self.root.after(10000, reset_cooldown)
-    
     # ===================================================================================================
 
     # ========================================= authentication ==========================================
     def on_closing(self):
-        """Release resources and close application"""
+        """Release resources and close application."""
         self.is_running = False
+        if self.reset_timer is not None:
+            self.reset_timer.cancel()  # Cancel the timer
         if self.detection_thread and self.detection_thread.is_alive():
             self.detection_thread.join(timeout=1.0)
         if self.cap is not None:
@@ -451,6 +491,7 @@ class HighCourt:
 
     def show_password_popup(self):
         """Show a password entry popup with a numeric keypad."""
+        self.on_action_performed()
         self.password_window = ctk.CTkToplevel(self.root)
         self.password_window.title("Password Verification")
         self.password_window.geometry("360x480")  # Increased height to accommodate new buttons
@@ -532,14 +573,17 @@ class HighCourt:
 
     def reset_password(self):
         """Reset the password field."""
+        self.on_action_performed()
         self.password_var.set("")
 
     def close_password_window(self):
         """Close the password window."""
+        self.on_action_performed()
         self.password_window.destroy()
 
     def handle_keypress(self, key):
         """Handle keypresses for the numeric keypad."""
+        self.on_action_performed()
         if key == '⌫':  # Backspace
             self.password_var.set(self.password_var.get()[:-1])
         elif key == '✔':  # Enter
@@ -549,6 +593,7 @@ class HighCourt:
 
     def verify_password(self):
         """Verify the entered password and close the app if correct."""
+        self.on_action_performed()
         password = self.password_var.get()
         if password:
             for user in self.auth_data:
@@ -561,6 +606,7 @@ class HighCourt:
 
     def load_auth_data(self):
         """Load authentication data from auth.json."""
+        self.on_action_performed()
         try:
             with open("auth.json", "r", encoding="utf-8") as file:
                 self.auth_data = json.load(file)
@@ -571,8 +617,33 @@ class HighCourt:
                 {"admin": "244466666"}
             ]
 
+    def stop_application(self):
+        self.on_action_performed()
+        self.camera_pause = True
+        self.speak_pause = True
+        self.conversation_pause = True
+        self.listen_pause = True
+        self.face_detection_cooldown = False
+
+        # Stop any ongoing audio playback
+        if pygame.mixer.get_init() is not None:
+            pygame.mixer.music.stop()
+            pygame.mixer.quit()
+        
+        # Clear the subtitle label and text input
+        self.subtitle_label.configure(text="")
+        self.text_input.delete(0, ctk.END)
+        self.update_table("")
+
     def reset_application(self):
         """Stop all running and pending operations, and restart the application as fresh."""
+        self.on_action_performed()
+        self.camera_pause = False
+        self.speak_pause = False
+        self.conversation_pause = False
+        self.listen_pause = False
+        self.face_detection_cooldown = False
+
         # Stop any ongoing audio playback
         if pygame.mixer.get_init() is not None:
             pygame.mixer.music.stop()
@@ -585,6 +656,7 @@ class HighCourt:
 
     def load_image(self, path, size):
         """Load and resize an image."""
+        self.on_action_performed()
         try:
             image = Image.open(path)
             image = image.resize(size, Image.Resampling.LANCZOS)
@@ -598,6 +670,8 @@ class HighCourt:
     # ========================================== main keyboard ==========================================
     def create_numeric_keypad(self):
         """Create a full keyboard with alphanumeric keys."""
+        self.on_action_performed()
+
         # Create a frame for the keyboard
         self.keypad_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.keypad_frame.pack(padx=10, pady=10)
@@ -656,7 +730,7 @@ class HighCourt:
             height=60,
             fg_color="black",
             border_width=2,
-            border_color="red",
+            border_color="aqua",
             corner_radius=40,
             command=self.remove_last_character
         )
@@ -671,7 +745,7 @@ class HighCourt:
             height=60,
             fg_color="black",
             border_width=2,
-            border_color="red",
+            border_color="aqua",
             corner_radius=40,
             command=lambda: self.append_to_input(' ')
         )
@@ -686,9 +760,9 @@ class HighCourt:
             height=60,
             fg_color="black",
             border_width=2,
-            border_color="red",
+            border_color="aqua",
             corner_radius=40,
-            command=lambda: self.process_case_details(self.text_input.get(), "en")
+            command=lambda: self.process_case_details(self.text_input.get(), "pa")
         )
         enter_button.grid(row=row_idx, column=5, columnspan=2, padx=5, pady=10)
 
@@ -701,7 +775,7 @@ class HighCourt:
             height=60,
             fg_color="black",
             border_width=2,
-            border_color="red",
+            border_color="aqua",
             corner_radius=40,
             command=self.clear_input
         )
@@ -724,12 +798,14 @@ class HighCourt:
 
     def append_to_input(self, character):
         """Append the clicked character to the text input."""
+        self.on_action_performed()
         current_text = self.text_input.get()
         self.text_input.delete(0, ctk.END)
         self.text_input.insert(0, current_text + character)
 
     def remove_last_character(self):
         """Remove the last character from the text input."""
+        self.on_action_performed()
         current_text = self.text_input.get()
         if current_text:
             self.text_input.delete(0, ctk.END)
@@ -737,12 +813,14 @@ class HighCourt:
 
     def clear_input(self):
         """Clear the entire text input."""
+        self.on_action_performed()
         self.text_input.delete(0, ctk.END)
     
     # ===================================================================================================
     
     # ======================================== case table ===============================================
     def create_case_table(self):
+        self.on_action_performed()
         # Create frame for table with fixed size
         self.table_frame = ctk.CTkFrame(self.main_frame, width=940, height=120,
                                         border_width=2,
@@ -783,11 +861,13 @@ class HighCourt:
         self.tree.pack(side="left", fill="both", expand=True)
     
     def on_text_change(self, event=None):
+        self.on_action_performed()
         """Update table when text input changes"""
         case_id = self.text_input.get()
         self.update_table(case_id)
 
-    def update_table(self, case_details=None):
+    def update_table(self, case_details=None, lang='pa'):
+        self.on_action_performed()
         # Clear existing items
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -796,10 +876,10 @@ class HighCourt:
             self.case_id_var.set(f"ਕੇਸ ਨੰਬਰ: {case_details['case_id']}")
             self.tree.insert("", "end", values=(
                 case_details['case_id'],
-                self.translate_text(case_details['petitioner_name'], source='en', target='pa'),
-                self.translate_text(case_details['respondent_name'], source='en', target='pa'),
-                self.translate_text(case_details['advocate_name'], source='en', target='pa'),
-                self.translate_text(case_details['status'], source='en', target='pa'),
+                self.translate_text(case_details['petitioner_name'], source='en', target=lang),
+                self.translate_text(case_details['respondent_name'], source='en', target=lang),
+                self.translate_text(case_details['advocate_name'], source='en', target=lang),
+                self.translate_text(case_details['status'], source='en', target=lang),
                 case_details['next_date']
             ))
         elif isinstance(case_details, str):
@@ -807,8 +887,12 @@ class HighCourt:
         else:
             self.case_id_var.set("ਕੇਸ ਨੰਬਰ: ਨਹੀਂ ਲਭਿਆ")
 
-    def process_case_details(self, case_id, lang="en"):
+    def process_case_details(self, case_id, lang="pa"):
+        self.on_action_performed()
         self.camera_pause=True
+        self.speak_pause = False
+        self.conversation_pause = False
+        self.listen_pause = False
         
         BASE_URL = "http://192.168.1.12:8000/cases"
 
@@ -846,7 +930,7 @@ class HighCourt:
         else:
             self.speak_text("Case not found.", lang)
 
-        self.update_table(case_details)
+        self.update_table(case_details, lang=lang)
 
         self.camera_pause = False
         
@@ -855,6 +939,7 @@ class HighCourt:
     #  ================================ language Speak and Translate ====================================
     def translate_text(self, text, source, target):
         """Translate text from source language to target language."""
+        self.on_action_performed()
         key = (source, target)
         if key not in self._translators:
             self._translators[key] = GoogleTranslator(source=source, target=target)
@@ -864,11 +949,16 @@ class HighCourt:
             print(f"Translation error: {e}")
             return text
 
-    def speak_text(self, text, lang="en"):
+    def speak_text(self, text, lang="pa"):
         """
         Convert text to speech and play it using gTTS and pygame.
         This method has been optimized to reduce resource usage and improve performance.
         """
+        self.on_action_performed()
+
+        if self.speak_pause:
+            return 
+        
         try:
             # Remove the existing file if it exists
             if os.path.exists("speech.mp3"):
@@ -884,9 +974,7 @@ class HighCourt:
 
             # Load the speech file into pygame mixer
             pygame.mixer.music.load("speech.mp3")
-
-            # Play the audio
-            pygame.mixer.music.play()
+            pygame.mixer.music.play() # Play the audio
 
             # Calculate the total duration of the audio
             audio = pygame.mixer.Sound("speech.mp3")
@@ -907,6 +995,9 @@ class HighCourt:
 
             # Display words in real-time as the audio plays
             for word in words:
+                if self.speak_pause:
+                    return
+                
                 if self.root and self.subtitle_label.winfo_exists():
                     # Append the current word to the subtitle label
                     current_text = self.subtitle_label.cget("text")
@@ -921,6 +1012,8 @@ class HighCourt:
 
             # Wait for the audio to finish playing
             while pygame.mixer.music.get_busy():
+                if self.speak_pause:
+                    return
                 pygame.time.Clock().tick(10)  # Limit the loop to 10 FPS to reduce CPU usage
 
             # Clean up pygame mixer
@@ -929,15 +1022,13 @@ class HighCourt:
         except Exception as e:
             print(f"Text-to-speech error: {e}")
 
-        finally:
-            # Clear the subtitle label after the audio finishes
-            if self.root and self.subtitle_label.winfo_exists():
-                self.subtitle_label.configure(text="")
-                self.root.update()
-        
-    
-    def listen(self, lang="en"):
+    def listen(self, lang="pa"):
         """Listen for user input and return the recognized text."""
+        self.on_action_performed()
+
+        if self.listen_pause:
+            return
+
         recognizer = sr.Recognizer()
 
         with sr.Microphone() as source:
@@ -954,11 +1045,11 @@ class HighCourt:
                 return recognized_text
 
             except sr.UnknownValueError:
-                messagebox.showerror("Error", "Could not understand audio.")
+                print("Error", "Could not understand audio.")
             except sr.RequestError as e:
-                messagebox.showerror("Error", f"Could not request results; {e}")
+                print("Error", f"Could not request results; {e}")
             except Exception as e:
-                messagebox.showerror("Error", f"An error occurred: {e}")
+                print("Error", f"An error occurred: {e}")
 
         return ""
     
@@ -966,6 +1057,7 @@ class HighCourt:
 
     # ======================================= listen case id ============================================
     def number_to_words(self, text):
+        self.on_action_performed()
         self.number_words = {
             "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
             "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine"
@@ -975,6 +1067,7 @@ class HighCourt:
         return text
 
     def map_spoken_numbers(self, text, lang='en'):
+        self.on_action_performed()
         self.punjabi_numbers = {
             "੦": "0", "੧": "1", "੨": "2", "੩": "3", "੪": "4",
             "੫": "5", "੬": "6", "੭": "7", "੮": "8", "੯": "9",
@@ -1007,6 +1100,12 @@ class HighCourt:
         return text
 
     def listen_case_type(self, case_types):
+        self.on_action_performed()
+
+        if self.listen_pause:
+            return
+        
+        self.listen_status = False
         recognizer = sr.Recognizer()
 
         with sr.Microphone() as source:
@@ -1023,6 +1122,7 @@ class HighCourt:
                 winsound.PlaySound(self.end_sound, winsound.SND_FILENAME)
                 
                 if closest_match:
+                    self.listen_status = True
                     return closest_match[0]
                 else:
                     for key, value in case_types.items():
@@ -1033,15 +1133,24 @@ class HighCourt:
                     return None
 
             except sr.UnknownValueError:
-                self.subtitle_label.configure(text="Sorry, I could not understand the audio."); self.root.update()
+                print("Sorry, I could not understand the audio.")
             except sr.RequestError as e:
-                self.subtitle_label.configure(text=f"Could not request results from the speech recognition service; {e}"); self.root.update()
+                print(f"Could not request results from the speech recognition service; {e}")
             except Exception as e:
-                self.subtitle_label.configure(text=f"An error occurred: {e}"); self.root.update()
+                print(f"An error occurred: {e}")
+            finally:
+                if not self.listen_status:
+                    self.listen_case_type(case_types=case_types)
 
             return None
 
     def listen_case_number(self, lang='en'):
+        self.on_action_performed()
+
+        if self.listen_pause:
+            return
+        
+        self.listen_status = False
         recognizer = sr.Recognizer()
 
         with sr.Microphone() as source:
@@ -1076,22 +1185,31 @@ class HighCourt:
                 structured_case_number = f"{numeric_part}-{alphanumeric_part}" if alphanumeric_part else numeric_part
 
                 if re.match(r'^\d+(-\w+)?$', structured_case_number):
+                    self.listen_status = True
                     return structured_case_number
                 else:
                     print(f"Invalid case number: {structured_case_number}. Case number must be in the format 'XXXX-XXX' or 'XXXX'.")
                     return None
 
             except sr.UnknownValueError:
-                self.subtitle_label.configure(text="Sorry, I could not understand the audio."); self.root.update()
+                print("Sorry, I could not understand the audio.")
             except sr.RequestError as e:
-                self.subtitle_label.configure(text=f"Could not request results from the speech recognition service; {e}"); self.root.update()
+                print("Could not request results from the speech recognition service; {e}")
             except Exception as e:
-                print()
-                self.subtitle_label.configure(text=f"An error occurred: {e}"); self.root.update()
+                print(f"An error occurred: {e}")
+            finally:
+                if not self.listen_status:
+                    self.listen_case_number(lang=lang)
 
             return None
 
     def listen_case_year(self, lang='en'):
+        self.on_action_performed()
+
+        if self.listen_pause:
+            return
+        
+        self.listen_status = False
         recognizer = sr.Recognizer()
 
         with sr.Microphone() as source:
@@ -1107,148 +1225,205 @@ class HighCourt:
                 winsound.PlaySound(self.end_sound, winsound.SND_FILENAME)
 
                 if recognized_text.isdigit() and len(recognized_text) == 4:
+                    self.listen_status = True
                     return recognized_text
                 else:
                     print(f"Invalid case year: {recognized_text}. Case year must be a 4-digit number.")
                     return None
 
             except sr.UnknownValueError:
-                self.subtitle_label.configure(text="Sorry, I could not understand the audio."); self.root.update()
+                print("Sorry, I could not understand the audio.")
             except sr.RequestError as e:
-                self.subtitle_label.configure(text=f"Could not request results from the speech recognition service; {e}"); self.root.update()
+                print(f"Could not request results from the speech recognition service; {e}")
             except Exception as e:
-                self.subtitle_label.configure(text=f"An error occurred: {e}"); self.root.update()
+                print(f"An error occurred: {e}")
+            finally:
+                if not self.listen_status:
+                    self.listen_case_year(lang=lang)
 
             return None
 
     def listen_case_id(self, case_types, lang='en'):
-        self.subtitle_label.configure(text="Listening Case Type...")
-        self.root.update()
-        case_type = self.listen_case_type(case_types)
-        if case_type:
-            self.text_input.delete(0, ctk.END)
-            self.text_input.insert(0, str(case_type))
+        self.on_action_performed()
+
+        if self.listen_pause:
+            return
+        try:
+            self.subtitle_label.configure(text="Listening Case Type...")
             self.root.update()
-        else:
-            return None
+            case_type = self.listen_case_type(case_types)
+            if case_type:
+                self.text_input.delete(0, ctk.END)
+                self.text_input.insert(0, str(case_type))
+                self.root.update()
+            else:
+                return None
 
-        self.subtitle_label.configure(text="Listening Case Number...")
-        self.root.update()
-        case_number = self.listen_case_number(lang)
-        if case_number:
-            self.text_input.delete(0, ctk.END)
-            self.text_input.insert(0, f"{case_type}-{case_number}")
+            self.subtitle_label.configure(text="Listening Case Number...")
             self.root.update()
-        else:
-            return None
-
-        self.subtitle_label.configure(text="Listening Case Year...")
-        self.root.update()
-        case_year = self.listen_case_year(lang)
-        if case_year:
-            self.text_input.delete(0, ctk.END)
-            self.text_input.insert(0, f"{case_type}-{case_number}-{case_year}")
+            case_number = self.listen_case_number(lang)
+            if case_number:
+                self.text_input.delete(0, ctk.END)
+                self.text_input.insert(0, f"{case_type}-{case_number}")
+                self.root.update()
+            else:
+                return None
+            
+            self.subtitle_label.configure(text="Listening Case Year...")
             self.root.update()
-        else:
-            return None
+            case_year = self.listen_case_year(lang)
+            if case_year:
+                self.text_input.delete(0, ctk.END)
+                self.text_input.insert(0, f"{case_type}-{case_number}-{case_year}")
+                self.root.update()
+            else:
+                return None
 
-        case_id = f"{case_type}-{case_number}-{case_year}"
-        print(f"Valid Case ID: {case_id}")
+            case_id = f"{case_type}-{case_number}-{case_year}"
+            print(f"Valid Case ID: {case_id}")
 
-        return case_id
-    
+            return case_id
+
+        except Exception as e:
+            print(f"Listen Case Id Error: {e}")    
     # ===================================================================================================
     
     # ====================================== Conversation ===============================================
-    def conversation(self, lang="pa"):
-        """Engage in a conversation based on user input."""
+    def mic_conversation(self, lang='pa'):
+        self.on_action_performed()
         self.camera_pause = True
-
-        # Dictionary of case types (abbreviation: full form)
-        case_types = self.case_types
-        
-        prompt_lang = "Kindly select a language. I could understand three languages, Punjabi, English and Hindi. Speak anyone of them."
-
-        prompt_lang = self.translate_text(prompt_lang, source='en', target=lang)
-        self.speak_text(prompt_lang, lang=lang)
-        selected_lang = self.listen(lang='en')
-
-        if 'english' in selected_lang.lower():
-            prompt_text = """
-                Congrates you selected english language.
-                Kindly tell me, how would you like to get the details?\n
-                1. Case Search
-                2. Judgment Search
-                3. Filing Search
-            """
-            lang = 'en'
-            self.speak_text(prompt_text, lang=lang)
-        elif 'punjabi' in selected_lang.lower():
-            prompt_text = """
-                Congrates you selected punjabi language.
-                Kindly tell me, how would you like to get the details?\n
-                1. Case Search
-                2. Judgment Search
-                3. Filing Search
-            """
-            lang = 'pa'
-            translated_prompt = self.translate_text(prompt_text, source="en", target=lang)
-            self.speak_text(translated_prompt, lang=lang)
-        elif 'hindi' in selected_lang.lower():
-            prompt_text = """
-                Congrates you selected hindi language.
-                Kindly tell me, how would you like to get the details?\n
-                1. Case Search
-                2. Judgment Search
-                3. Filing Search
-            """
-            lang = 'hi'
-            translated_prompt = self.translate_text(prompt_text, source="en", target=lang)
-            self.speak_text(translated_prompt, lang=lang)
-        else:
-            prompt_text = """
-                You did not selected any language. So by default I will continoue with punjabi language.
-                Kindly tell me, how would you like to get the details?\n
-                1. Case Search
-                2. Judgment Search
-                3. Filing Search
-            """
-            lang = 'pa'
-            translated_prompt = self.translate_text(prompt_text, source="en", target=lang)
-            self.speak_text(translated_prompt, lang=lang)
-
-        # Listen for user input
-        search_type = self.listen(lang=lang)
-        if any(str(word) in search_type.lower() for word in ['1', 'one', 'ek', 'ik', 'case search', 'केस खोज', 'ਕੇਸ ਖੋਜ', 'एक', 'ਇੱਕ']):
-            search_type = 'case search'
-        elif any(str(word) in search_type.lower() for word in ['2', 'two', 'tu', 'do', 'judgment search', 'निर्णय खोज', 'ਨਿਰਣੇ ਦੀ ਖੋਜ', 'दो', 'ਦੋ']):
-            search_type = 'judgment search'
-        elif any(str(word) in search_type.lower() for word in ['3', 'three', 'teen', 'filing search', 'फाइलिंग खोज', 'ਫਾਈਲਿੰਗ ਖੋਜ', 'तीन', 'ਤਿੰਨ']):
-            search_type = 'filing search'
-        else:
-            print("no match found.")
-        self.speak_text(f"Ok. You want to make a search by {search_type}.", lang=lang)
-
-        search_type = "case search"  # remove it later
-
-        if search_type == 'case search':
-            self.speak_text("Kindly speak case number. ", lang=lang)
-            case_id = self.listen_case_id(case_types, lang=lang)
-            self.speak_text(f"Your case number is {case_id}.")
-            if case_id:
-                self.text_input.delete(0, ctk.END)
-                self.text_input.insert(0, case_id)
-                self.root.update()
-
-                self.process_case_details(case_id, lang)
-        else:
-            self.speak_text("No case found.")
+        self.speak_pause = False
+        self.conversation_pause = False
+        self.listen_pause = False
+        self.conversation(lang)
         
         self.camera_pause = False
+    
+    def face_conversation(self):
+        """Prompt the user for case number after face detection"""
+        self.on_action_performed()
+        
+        self.camera_pause = True
+        self.speak_pause = False
+        self.conversation_pause = False
+        self.listen_pause = False
 
+        self.conversation(lang='pa')
+
+        # Reset the face_detection_cooldown flag after the conversation
+        self.face_detection_cooldown = False
+
+        self.camera_pause = False
+
+    def conversation(self, lang="pa"):
+        """Engage in a conversation based on user input."""
+        self.on_action_performed()
+
+        if self.conversation_pause:
+            return
+        try:
+            self.camera_pause = True
+
+            # Dictionary of case types (abbreviation: full form)
+            case_types = self.case_types
+            
+            prompt_lang = "Kindly select a language. I could understand three languages, Punjabi, English and Hindi. Speak anyone of them."
+
+            prompt_lang = self.translate_text(prompt_lang, source='en', target=lang)
+            self.speak_text(prompt_lang, lang=lang)
+            selected_lang = self.listen(lang='en')
+
+            # Handle the case where selected_lang is None
+            if selected_lang is None:
+                self.speak_text(self.translate_text("I couldn't understand your language selection. Please try again.", source='en', target=lang), lang=lang)
+                return
+
+            if 'english' in selected_lang.lower():
+                prompt_text = """
+                    Congrates you selected english language.
+                    Kindly tell me, how would you like to get the details?
+                    1. Case Search
+                    2. Judgment Search
+                    3. Filing Search
+                """
+                lang = 'en'
+                self.speak_text(prompt_text, lang=lang)
+            elif 'punjabi' in selected_lang.lower():
+                prompt_text = """
+                    Congrates you selected punjabi language.
+                    Kindly tell me, how would you like to get the details?
+                    1. Case Search
+                    2. Judgment Search
+                    3. Filing Search
+                """
+                lang = 'pa'
+                translated_prompt = self.translate_text(prompt_text, source="en", target=lang)
+                self.speak_text(translated_prompt, lang=lang)
+            elif 'hindi' in selected_lang.lower():
+                prompt_text = """
+                    Congrates you selected hindi language.
+                    Kindly tell me, how would you like to get the details?
+                    1. Case Search
+                    2. Judgment Search
+                    3. Filing Search
+                """
+                lang = 'hi'
+                translated_prompt = self.translate_text(prompt_text, source="en", target=lang)
+                self.speak_text(translated_prompt, lang=lang)
+            else:
+                prompt_text = """
+                    You did not selected any language. So by default I will continoue with punjabi language.
+                    Kindly tell me, how would you like to get the details?
+                    1. Case Search
+                    2. Judgment Search
+                    3. Filing Search
+                """
+                lang = 'pa'
+                translated_prompt = self.translate_text(prompt_text, source="en", target=lang)
+                self.speak_text(translated_prompt, lang=lang)
+
+            search_type = self.listen(lang='en')
+
+            # Listen for user input
+            if search_type is not None:
+                if any(str(word) in search_type.lower() for word in ['1', 'one', 'ek', 'ik', 'case search', 'केस खोज', 'ਕੇਸ ਖੋਜ', 'एक', 'ਇੱਕ']):
+                    search_type = 'case search'
+                elif any(str(word) in search_type.lower() for word in ['2', 'two', 'tu', 'do', 'judgment search', 'निर्णय खोज', 'ਨਿਰਣੇ ਦੀ ਖੋਜ', 'दो', 'ਦੋ']):
+                    search_type = 'judgment search'
+                elif any(str(word) in search_type.lower() for word in ['3', 'three', 'teen', 'filing search', 'फाइलिंग खोज', 'ਫਾਈਲਿੰਗ ਖੋਜ', 'तीन', 'ਤਿੰਨ']):
+                    search_type = 'filing search'
+                else:
+                    print("No match found.")
+                    self.speak_text(self.translate_text("No valid search type recognized. Please try again.", source='en', target=lang), lang=lang)
+                    return  
+            else:
+                self.speak_text(self.translate_text("I couldn't understand your input. Please try again.", source='en', target=lang), lang=lang)
+                return
+            
+            self.speak_text(self.translate_text(f"Ok. You want to make a search by {search_type}.", source='en', target=lang), lang=lang)
+
+            search_type = "case search"  # remove it later
+
+            if search_type == 'case search':
+                self.speak_text(self.translate_text("Kindly speak case number. ", source='en', target=lang), lang=lang)
+                case_id = self.listen_case_id(case_types, lang=lang)
+                
+                if case_id:
+                    self.text_input.delete(0, ctk.END)
+                    self.text_input.insert(0, case_id)
+                    self.root.update()
+                    self.process_case_details(case_id, lang)
+            else:
+                self.speak_text(self.translate_text("No valid case ID recognized. Please try again.", source='en', target=lang), lang=lang)
+            
+            self.camera_pause = False
+        
+        except Exception as e:
+            print("Conversation error ", e)
     # ===================================================================================================
 
 if __name__ == "__main__":
     root = ctk.CTk()
     tts = HighCourt(root)
     root.mainloop()
+

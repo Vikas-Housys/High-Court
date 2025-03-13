@@ -31,8 +31,6 @@ class HighCourt:
         pygame.mixer.init()
         self.load_auth_data()
 
-        self.camera_pause=False
-
         # Create main frame
         self.main_frame = ctk.CTkFrame(root, fg_color="transparent")
         self.main_frame.pack(fill="both", expand=True)
@@ -209,6 +207,23 @@ class HighCourt:
         self.last_button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.last_button_frame.pack(padx=10, pady=10)
         
+        # Stop button
+        self.stop_button = ctk.CTkButton(
+            self.last_button_frame,
+            text="Stop",
+            command=self.stop_application,
+            font=ctk.CTkFont(size=24, weight="bold"),
+            fg_color="olive",
+            text_color="white",
+            height=60,
+            width=180,
+            border_width=2,
+            border_color="black",
+            corner_radius=40
+        )
+        self.stop_button.pack(side="left", padx=10, pady=10)
+
+        
         # Close button
         self.close_button = ctk.CTkButton(
             self.last_button_frame,
@@ -312,10 +327,6 @@ class HighCourt:
         max_face_size = (240, 240)
         
         while self.is_running:
-            if self.camera_pause:
-                time.sleep(0.1)
-                continue
-
             ret, frame = self.cap.read()
             if not ret:
                 time.sleep(0.1)
@@ -572,16 +583,39 @@ class HighCourt:
             ]
 
     def reset_application(self):
+        """Reset the application to its initial state."""
+        self.text_input.delete(0, ctk.END)
+        self.subtitle_label.configure(text="")
+        self.update_table("")
+        
+        # Stop any ongoing audio playback
+        if pygame.mixer.get_init() is not None:
+            pygame.mixer.music.stop()
+            pygame.mixer.quit()
+    
+    def stop_application(self):
         """Stop all running and pending operations, and restart the application as fresh."""
+        # Stop the camera and face detection
+        self.is_running = False
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+        
         # Stop any ongoing audio playback
         if pygame.mixer.get_init() is not None:
             pygame.mixer.music.stop()
             pygame.mixer.quit()
         
-        # Clear the subtitle label and text input
         self.subtitle_label.configure(text="")
         self.text_input.delete(0, ctk.END)
         self.update_table("")
+        
+        # Reset the face detection flags
+        self.face_detected = False
+        self.face_detection_cooldown = False
+        
+        # Restart the camera and face detection
+        self.start_camera()
 
     def load_image(self, path, size):
         """Load and resize an image."""
@@ -808,8 +842,6 @@ class HighCourt:
             self.case_id_var.set("Case Number: Not Found")
 
     def process_case_details(self, case_id, lang="en"):
-        self.camera_pause=True
-        
         BASE_URL = "http://192.168.1.12:8000/cases"
 
         # Check if the case details are already cached
@@ -847,8 +879,6 @@ class HighCourt:
             self.speak_text("Case not found.", lang)
 
         self.update_table(case_details)
-
-        self.camera_pause = False
         
     # ===================================================================================================
 
@@ -1162,7 +1192,6 @@ class HighCourt:
     # ====================================== Conversation ===============================================
     def conversation(self, lang="en"):
         """Engage in a conversation based on user input."""
-        self.camera_pause = True
 
         # Dictionary of case types (abbreviation: full form)
         case_types = self.case_types
@@ -1227,7 +1256,7 @@ class HighCourt:
             search_type = 'filing search'
         else:
             print("no match found.")
-        self.speak_text(self.translate_text(f"Ok. You want to make a search by {search_type}.", source='en', target=lang), lang=lang)
+        self.speak_text(f"Ok. You want to make a search by {search_type}.", lang=lang)
 
         search_type = "case search"  # remove it later
 
@@ -1243,12 +1272,11 @@ class HighCourt:
                 self.process_case_details(case_id, lang)
         else:
             self.speak_text("No case found.")
-        
-        self.camera_pause = False
-
+    
     # ===================================================================================================
 
 if __name__ == "__main__":
     root = ctk.CTk()
     tts = HighCourt(root)
     root.mainloop()
+

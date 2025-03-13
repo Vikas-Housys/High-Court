@@ -31,8 +31,6 @@ class HighCourt:
         pygame.mixer.init()
         self.load_auth_data()
 
-        self.camera_pause=False
-
         # Create main frame
         self.main_frame = ctk.CTkFrame(root, fg_color="transparent")
         self.main_frame.pack(fill="both", expand=True)
@@ -40,7 +38,7 @@ class HighCourt:
         # Add heading above the title
         self.heading_label = ctk.CTkLabel(
             self.main_frame,
-            text="Session Court Case Management",
+            text="ਸੈਸ਼ਨ ਕੋਰਟ ਕੇਸ ਪ੍ਰਬੰਧਨ",
             font=ctk.CTkFont(size=38, weight="bold"),
             text_color="blue",  # Blue color
         )
@@ -74,7 +72,7 @@ class HighCourt:
 
         # Label for the text input box
         self.text_input_label = ctk.CTkLabel(self.main_frame, 
-                                            text="Search", 
+                                            text="ਖੋਜ", 
                                             font=ctk.CTkFont(size=28, weight="bold"))
         self.text_input_label.pack(padx=10, pady=10)
 
@@ -187,7 +185,7 @@ class HighCourt:
         # Create a label inside the frame
         self.subtitle_label = ctk.CTkLabel(
             self.subtitle_frame,
-            text="Case details",
+            text="ਕੇਸ ਦੇ ਵੇਰਵੇ",
             width=940,
             height=280,
             font=ctk.CTkFont(size=22, weight="bold"),
@@ -312,10 +310,6 @@ class HighCourt:
         max_face_size = (240, 240)
         
         while self.is_running:
-            if self.camera_pause:
-                time.sleep(0.1)
-                continue
-
             ret, frame = self.cap.read()
             if not ret:
                 time.sleep(0.1)
@@ -386,7 +380,7 @@ class HighCourt:
                     
                     # Add text indicating why it's not detected
                     if face_size < min_face_size[0]:
-                        range_text = "TOO FAR"
+                        range_text = "TOO FAR"  # Too Far
                     elif face_size > max_face_size[0]:
                         range_text = "TOO CLOSE"
                         
@@ -419,7 +413,6 @@ class HighCourt:
             # Small delay to reduce CPU usage
             time.sleep(0.03)  # ~30 FPS
             
-
     def prompt_for_case_number(self):
         """Prompt the user for case number after face detection"""
         if not self.face_detected:
@@ -553,7 +546,7 @@ class HighCourt:
         if password:
             for user in self.auth_data:
                 if password in user.values():
-                    self.on_closing()  # Use on_closing to properly release camera resources
+                    self.on_closing()
                     return
             messagebox.showerror("Error", "Incorrect password.")
         else:
@@ -572,16 +565,23 @@ class HighCourt:
             ]
 
     def reset_application(self):
-        """Stop all running and pending operations, and restart the application as fresh."""
+        """Reset the application to its initial state."""
+        self.text_input.delete(0, ctk.END)
+        self.subtitle_label.configure(text="")
+        self.update_table("")
+
         # Stop any ongoing audio playback
         if pygame.mixer.get_init() is not None:
             pygame.mixer.music.stop()
             pygame.mixer.quit()
-        
-        # Clear the subtitle label and text input
-        self.subtitle_label.configure(text="")
-        self.text_input.delete(0, ctk.END)
-        self.update_table("")
+
+        # Reset the face detection flags
+        self.face_detected = False
+        self.face_detection_cooldown = False
+
+        # Restart the camera and face detection
+        if self.cap is None:
+            self.start_camera()
 
     def load_image(self, path, size):
         """Load and resize an image."""
@@ -656,7 +656,7 @@ class HighCourt:
             height=60,
             fg_color="black",
             border_width=2,
-            border_color="red",
+            border_color="blue",
             corner_radius=40,
             command=self.remove_last_character
         )
@@ -671,7 +671,7 @@ class HighCourt:
             height=60,
             fg_color="black",
             border_width=2,
-            border_color="red",
+            border_color="blue",
             corner_radius=40,
             command=lambda: self.append_to_input(' ')
         )
@@ -686,7 +686,7 @@ class HighCourt:
             height=60,
             fg_color="black",
             border_width=2,
-            border_color="red",
+            border_color="blue",
             corner_radius=40,
             command=lambda: self.process_case_details(self.text_input.get(), "en")
         )
@@ -701,7 +701,7 @@ class HighCourt:
             height=60,
             fg_color="black",
             border_width=2,
-            border_color="red",
+            border_color="blue",
             corner_radius=40,
             command=self.clear_input
         )
@@ -731,9 +731,9 @@ class HighCourt:
     def remove_last_character(self):
         """Remove the last character from the text input."""
         current_text = self.text_input.get()
-        if current_text:  # Check if there is text to remove
+        if current_text:
             self.text_input.delete(0, ctk.END)
-            self.text_input.insert(0, current_text[:-1])  # Remove the last character
+            self.text_input.insert(0, current_text[:-1])
 
     def clear_input(self):
         """Clear the entire text input."""
@@ -753,7 +753,7 @@ class HighCourt:
 
         ### Case Number
         # Create a StringVar to hold the case number
-        self.case_id_var = ctk.StringVar(value="Case Id: ")  # Default text
+        self.case_id_var = ctk.StringVar(value="ਕੇਸ ਆਈ.ਡੀ: ")
 
         # Label for the text input box
         self.text_input_label = ctk.CTkLabel(
@@ -767,7 +767,7 @@ class HighCourt:
         self.text_input_label.pack(padx=5, pady=5)
 
         # Create table with Treeview
-        columns = ("Case ID", "Petitioner Name", "Respondent Name", "Advocate Name", "Status", "Next Date")
+        columns = ("ਕੇਸ ਆਈਡੀ", "ਪਟੀਸ਼ਨਰ ਦਾ ਨਾਮ", "ਜਵਾਬਦੇਹ ਦਾ ਨਾਮ", "ਵਕੀਲ ਦਾ ਨਾਮ", "ਸਥਿਤੀ", "ਅਗਲੀ ਤਾਰੀਖ")
         self.tree = ttk.Treeview(self.table_frame, columns=columns, show="headings", height=10)
 
         # Configure column headings to be centered
@@ -793,23 +793,21 @@ class HighCourt:
             self.tree.delete(item)
         
         if isinstance(case_details, dict):
-            self.case_id_var.set(f"Case Number: {case_details['case_id']}")
+            self.case_id_var.set(f"ਕੇਸ ਨੰਬਰ: {case_details['case_id']}")
             self.tree.insert("", "end", values=(
                 case_details['case_id'],
-                case_details['petitioner_name'],
-                case_details['respondent_name'],
-                case_details['advocate_name'],
-                case_details['status'],
+                self.translate_text(case_details['petitioner_name'], source='en', target='pa'),
+                self.translate_text(case_details['respondent_name'], source='en', target='pa'),
+                self.translate_text(case_details['advocate_name'], source='en', target='pa'),
+                self.translate_text(case_details['status'], source='en', target='pa'),
                 case_details['next_date']
             ))
         elif isinstance(case_details, str):
-            self.case_id_var.set(f"Case Number: {case_details}")
+            self.case_id_var.set(f"ਕੇਸ ਨੰਬਰ: {case_details}")
         else:
-            self.case_id_var.set("Case Number: Not Found")
+            self.case_id_var.set("ਕੇਸ ਨੰਬਰ: ਨਹੀਂ ਲਭਿਆ")
 
     def process_case_details(self, case_id, lang="en"):
-        self.camera_pause=True
-        
         BASE_URL = "http://192.168.1.12:8000/cases"
 
         # Check if the case details are already cached
@@ -847,8 +845,6 @@ class HighCourt:
             self.speak_text("Case not found.", lang)
 
         self.update_table(case_details)
-
-        self.camera_pause = False
         
     # ===================================================================================================
 
@@ -884,8 +880,6 @@ class HighCourt:
 
             # Load the speech file into pygame mixer
             pygame.mixer.music.load("speech.mp3")
-
-            # Play the audio
             pygame.mixer.music.play()
 
             # Calculate the total duration of the audio
@@ -1160,15 +1154,13 @@ class HighCourt:
     # ===================================================================================================
     
     # ====================================== Conversation ===============================================
-    def conversation(self, lang="en"):
+    def conversation(self, lang="pa"):
         """Engage in a conversation based on user input."""
-        self.camera_pause = True
 
         # Dictionary of case types (abbreviation: full form)
         case_types = self.case_types
         
         prompt_lang = "Kindly select a language. I could understand three languages, Punjabi, English and Hindi. Speak anyone of them."
-
         prompt_lang = self.translate_text(prompt_lang, source='en', target=lang)
         self.speak_text(prompt_lang, lang=lang)
         selected_lang = self.listen(lang='en')
@@ -1232,9 +1224,9 @@ class HighCourt:
         search_type = "case search"  # remove it later
 
         if search_type == 'case search':
-            self.speak_text("Kindly speak case number. ", lang=lang)
+            self.speak_text(self.translate_text("Kindly speak case number.", source='en', target=lang), lang=lang)
             case_id = self.listen_case_id(case_types, lang=lang)
-            self.speak_text(f"Your case number is {case_id}.")
+            self.speak_text(self.translate_text(f"Your case number is {case_id}.", source='en', target=lang), lang=lang)
             if case_id:
                 self.text_input.delete(0, ctk.END)
                 self.text_input.insert(0, case_id)
@@ -1243,12 +1235,12 @@ class HighCourt:
                 self.process_case_details(case_id, lang)
         else:
             self.speak_text("No case found.")
-        
-        self.camera_pause = False
-
+    
     # ===================================================================================================
 
 if __name__ == "__main__":
     root = ctk.CTk()
     tts = HighCourt(root)
     root.mainloop()
+
+
